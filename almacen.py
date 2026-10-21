@@ -1,0 +1,416 @@
+"""Lo que se escribe: solicitudes de cobro, su historial, avisos, excepciones y regalías vistas como pagadas.
+
+- Base: Postgres si hay DATABASE_URL/POSTGRES_URL (Vercel + Neon); si no, SQLite en datos-app/ (uso local).
+- Archivos (factura PDF/XML, comprobante de pago): Vercel Blob si hay BLOB_READ_WRITE_TOKEN; si no, datos-app/archivos/.
+  Nunca se exponen las URLs: la app los sirve después de revisar permisos.
+- Correo: Resend si hay RESEND_API_KEY; si no, se escribe en datos-app/correos.log.
+
+Flujo de una solicitud:  facturado → aprobado → pagado
+                                   ↘ rechazado (con motivo) → facturado (corrección) …
+"""
+import json
+import os
+import sqlite3
+import uuid
+import xml.etree.ElementTree as ET
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+import calculo
+
+HERE = Path(__file__).resolve().parent
+LOCAL = Path(os.environ["DATOS_APP"]) if os.environ.get("DATOS_APP") and not os.environ.get("VERCEL") else HERE / "datos-app"
+PG_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
+RESEND_KEY = os.environ.get("RESEND_API_KEY")
+REMITENTE = os.environ.get("CORREO_REMITENTE", "Referidos Pulppo <referidos@pulppo.com>")
+
+ESQUEMA = """
+CREATE TABLE IF NOT EXISTS solicitudes (
+  id TEXT PRIMARY KEY, tipo TEXT NOT NULL, referidor_id TEXT NOT NULL, referidor_email TEXT, referidor_nombre TEXT,
+  inmobiliaria TEXT, periodo TEXT NOT NULL, monto DOUBLE PRECISION NOT NULL, lineas TEXT NOT NULL, estado TEXT NOT NULL,
+  factura_pdf TEXT, factura_xml TEXT, cfdi TEXT, motivo_rechazo TEXT, limite_correccion TEXT,
+  creada TEXT NOT NULL, actualizada TEXT NOT NULL, aprobada TEXT, pago_desde TEXT, pago_hasta TEXT,
+  pagada TEXT, pago_referencia TEXT, comprobante TEXT
+);
+CREATE TABLE IF NOT EXISTS eventos (
+  id TEXT PRIMARY KEY, solicitud_id TEXT NOT NULL, fecha TEXT NOT NULL, actor_email TEXT, actor_rol TEXT,
+  de TEXT, a TEXT NOT NULL, nota TEXT
+);
+CREATE TABLE IF NOT EXISTS avisos (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, solicitud_id TEXT, texto TEXT NOT NULL, fecha TEXT NOT NULL, leido INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS excepciones (
+  email TEXT PRIMARY KEY, agregada_por TEXT, fecha TEXT
+);
+CREATE TABLE IF NOT EXISTS regalias_vistas (
+  company_id TEXT NOT NULL, mes TEXT NOT NULL, pagada_en TEXT NOT NULL, PRIMARY KEY (company_id, mes)
+);
+"""
+
+
+class ErrorFlujo(Exception):
+    """Transición no permitida o dato faltante: se muestra tal cual al usuario."""
+
+
+# ---------------------------------------------------------------- conexión
+
+def _conn():
+    if PG_URL:
+        import psycopg
+        return psycopg.connect(PG_URL, autocommit=True)
+    LOCAL.mkdir(exist_ok=True)
+    c = sqlite3.connect(LOCAL / "referidos.db", isolation_level=None)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def _q(sql):
+    return sql.replace("?", "%s") if PG_URL else sql
+
+
+def ejecutar(sql, args=()):
+    with _conn() as c:
+        cur = c.cursor()
+        cur.execute(_q(sql), args)
+        if cur.description is None:
+            return []
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def iniciar(cfg):
+    with _conn() as c:
+        for st in [s.strip() for s in ESQUEMA.split(";") if s.strip()]:
+            c.cursor().execute(st)
+    if not ejecutar("SELECT email FROM excepciones LIMIT 1"):
+        for e in cfg.get("excepciones_iniciales", []):
+            agregar_excepcion(e, "config.json")
+
+
+def ahora():
+    n = datetime.now(timezone.utc)
+    if os.environ.get("HOY") and not os.environ.get("VERCEL"):  # solo local: fecha simulada para probar plazos
+        h = date.fromisoformat(os.environ["HOY"])
+        n = n.astimezone(calculo.MX).replace(year=h.year, month=h.month, day=h.day).astimezone(timezone.utc)
+    return n.isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------- archivos
+
+def guardar_archivo(nombre, contenido, tipo):
+    """Guarda y devuelve una referencia interna (URL de Blob o ruta local)."""
+    ruta = f"referidos/{uuid.uuid4().hex}/{nombre}"
+    if BLOB_TOKEN:
+        import requests
+        r = requests.put(f"https://blob.vercel-storage.com/{ruta}", data=contenido, timeout=60,
+                         headers={"authorization": f"Bearer {BLOB_TOKEN}", "x-api-version": "7",
+                                  "x-content-type": tipo, "x-add-random-suffix": "1"})
+        r.raise_for_status()
+        return r.json()["url"]
+    f = LOCAL / "archivos" / ruta
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(contenido)
+    return "local:" + ruta
+
+
+def leer_archivo(ref):
+    if ref.startswith("local:"):
+        f = (LOCAL / "archivos" / ref[6:]).resolve()
+        if LOCAL.resolve() not in f.parents:
+            raise ErrorFlujo("Ruta inválida")
+        return f.read_bytes()
+    import requests
+    r = requests.get(ref, timeout=60, headers={"authorization": f"Bearer {BLOB_TOKEN}"} if BLOB_TOKEN else {})
+    r.raise_for_status()
+    return r.content
+
+
+# ---------------------------------------------------------------- CFDI
+
+def leer_cfdi(xml_bytes):
+    """Datos principales del XML de la factura (CFDI 3.3/4.0). Devuelve {} si no se puede leer."""
+    try:
+        raiz = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return {}
+    loc = lambda t: t.rsplit("}", 1)[-1]  # noqa: E731
+    if loc(raiz.tag) != "Comprobante":
+        return {}
+    out = {k: raiz.get(k) for k in ("Total", "SubTotal", "Moneda", "Fecha", "Serie", "Folio", "TipoDeComprobante")}
+    for nodo in raiz.iter():
+        t = loc(nodo.tag)
+        if t == "Emisor":
+            out["EmisorRfc"], out["EmisorNombre"] = nodo.get("Rfc"), nodo.get("Nombre")
+        elif t == "Receptor":
+            out["ReceptorRfc"], out["ReceptorNombre"] = nodo.get("Rfc"), nodo.get("Nombre")
+        elif t == "TimbreFiscalDigital":
+            out["UUID"] = (nodo.get("UUID") or "").upper()
+        elif t == "Concepto" and "Concepto" not in out:
+            out["Concepto"] = nodo.get("Descripcion")
+    for k in ("Total", "SubTotal"):
+        try:
+            out[k] = float(out[k])
+        except (TypeError, ValueError):
+            out[k] = None
+    return out
+
+
+# ---------------------------------------------------------------- correo y avisos
+
+def avisar(email, texto, solicitud_id=None, asunto=None, html=None):
+    ejecutar("INSERT INTO avisos (id, email, solicitud_id, texto, fecha) VALUES (?, ?, ?, ?, ?)",
+             (uuid.uuid4().hex, email, solicitud_id, texto, ahora()))
+    if asunto:
+        enviar_correo(email, asunto, html or f"<p>{texto}</p>")
+
+
+def enviar_correo(para, asunto, html):
+    if not RESEND_KEY:
+        LOCAL.mkdir(exist_ok=True)
+        with open(LOCAL / "correos.log", "a") as f:
+            f.write(json.dumps({"fecha": ahora(), "para": para, "asunto": asunto, "html": html}, ensure_ascii=False) + "\n")
+        return
+    import requests
+    try:
+        requests.post("https://api.resend.com/emails", timeout=20, headers={"Authorization": f"Bearer {RESEND_KEY}"},
+                      json={"from": REMITENTE, "to": [para], "subject": asunto, "html": html}).raise_for_status()
+    except Exception as e:  # el aviso en la herramienta ya quedó; el correo no debe tumbar la operación
+        print("Correo no enviado:", para, asunto, e)
+
+
+def avisos(email):
+    return ejecutar("SELECT * FROM avisos WHERE email = ? ORDER BY fecha DESC LIMIT 50", (email,))
+
+
+def marcar_leidos(email):
+    ejecutar("UPDATE avisos SET leido = 1 WHERE email = ?", (email,))
+
+
+# ---------------------------------------------------------------- excepciones y regalías
+
+def excepciones():
+    return [r["email"] for r in ejecutar("SELECT email FROM excepciones ORDER BY email")]
+
+
+def excepciones_detalle():
+    return ejecutar("SELECT * FROM excepciones ORDER BY email")
+
+
+def agregar_excepcion(email, por):
+    email = email.strip().lower()
+    if "@" not in email:
+        raise ErrorFlujo("Correo inválido")
+    if not ejecutar("SELECT email FROM excepciones WHERE email = ?", (email,)):
+        ejecutar("INSERT INTO excepciones (email, agregada_por, fecha) VALUES (?, ?, ?)", (email, por, ahora()))
+
+
+def quitar_excepcion(email):
+    ejecutar("DELETE FROM excepciones WHERE email = ?", (email.strip().lower(),))
+
+
+def registrar_regalias(regalias, hoy):
+    """Guarda el primer día en que se vio pagada la regalía de cada inmobiliaria y mes; devuelve {(cid, mes): date}."""
+    vistas = {(r["company_id"], r["mes"]): date.fromisoformat(r["pagada_en"]) for r in ejecutar("SELECT * FROM regalias_vistas")}
+    for k, v in regalias.items():
+        if v["estado"] == "paid" and k not in vistas:
+            ejecutar("INSERT INTO regalias_vistas (company_id, mes, pagada_en) VALUES (?, ?, ?)", (k[0], k[1], hoy.isoformat()))
+            vistas[k] = hoy
+    return vistas
+
+
+# ---------------------------------------------------------------- solicitudes
+
+def _sol(r):
+    if r:
+        r["lineas"] = json.loads(r["lineas"] or "[]")
+        r["cfdi"] = json.loads(r["cfdi"] or "{}")
+    return r
+
+
+def solicitudes(referidor_id=None, tipo=None):
+    sql, args = "SELECT * FROM solicitudes WHERE 1=1", []
+    if referidor_id:
+        sql += " AND referidor_id = ?"
+        args.append(referidor_id)
+    if tipo:
+        sql += " AND tipo = ?"
+        args.append(tipo)
+    return [_sol(r) for r in ejecutar(sql + " ORDER BY creada DESC", args)]
+
+
+def solicitud(sid):
+    r = ejecutar("SELECT * FROM solicitudes WHERE id = ?", (sid,))
+    return _sol(r[0]) if r else None
+
+
+def eventos(sid):
+    return ejecutar("SELECT * FROM eventos WHERE solicitud_id = ? ORDER BY fecha", (sid,))
+
+
+def _evento(sid, actor, rol, de, a, nota=None):
+    ejecutar("INSERT INTO eventos (id, solicitud_id, fecha, actor_email, actor_rol, de, a, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (uuid.uuid4().hex, sid, ahora(), actor, rol, de, a, nota))
+
+
+def _uuid_usado(uuid_cfdi, excepto):
+    if not uuid_cfdi:
+        return False
+    for r in ejecutar("SELECT id, cfdi FROM solicitudes WHERE id <> ?", (excepto or "",)):
+        if (json.loads(r["cfdi"] or "{}").get("UUID") or "") == uuid_cfdi:
+            return True
+    return False
+
+
+def facturar(cfg, hoy, referidor, tipo, lineas, pdf, xml, actor, corregir=None):
+    """El referidor sube su factura con todo lo disponible (nueva) o corrige una rechazada (corregir = id).
+    referidor = {id, email, nombre, inmobiliaria}; lineas = [{id, monto, mes, cobro_hasta, ...}]; pdf/xml = (nombre, bytes).
+    Programa nuevo: puede haber varias facturas en el mismo mes (lo que se libera después va en otra)."""
+    previa = None
+    if corregir:
+        previa = solicitud(corregir)
+        if not previa or previa["referidor_id"] != referidor["id"]:
+            raise ErrorFlujo("No existe la factura a corregir.")
+        if previa["estado"] != "rechazado":
+            raise ErrorFlujo("Solo se corrige una factura rechazada.")
+        if previa["limite_correccion"] and hoy > date.fromisoformat(previa["limite_correccion"]):
+            raise ErrorFlujo("Se venció el plazo para corregir esta factura.")
+    elif tipo == "anterior":
+        if any(x["estado"] != "rechazado" for x in solicitudes(referidor["id"], "anterior")):
+            raise ErrorFlujo("Ya enviaste la factura del programa anterior.")
+        if hoy > date.fromisoformat(cfg["programa_anterior_limite"]):
+            raise ErrorFlujo("El plazo para cobrar el programa anterior ya venció.")
+    if not previa and tipo == "mensual" and hoy.day > cfg["dia_limite_factura"]:
+        raise ErrorFlujo(f"Las facturas se suben del 1 al {cfg['dia_limite_factura']} de cada mes.")
+    if not lineas and not previa:
+        raise ErrorFlujo("No hay montos disponibles para facturar.")
+    if not pdf or not pdf[1].startswith(b"%PDF"):
+        raise ErrorFlujo("Sube la factura en PDF.")
+    if not xml:
+        raise ErrorFlujo("Sube el XML de la factura.")
+    cfdi = leer_cfdi(xml[1])
+    if not cfdi:
+        raise ErrorFlujo("El XML no es un CFDI válido.")
+    if _uuid_usado(cfdi.get("UUID"), previa and previa["id"]):
+        raise ErrorFlujo("Esa factura (UUID) ya se usó en otra solicitud.")
+
+    if previa:  # la corrección conserva lo ya solicitado y suma lo nuevo disponible
+        ids = {l["id"] for l in previa["lineas"]}
+        lineas = previa["lineas"] + [l for l in lineas if l["id"] not in ids]
+    monto = round(sum(l["monto"] for l in lineas), 2)
+    ref_pdf = guardar_archivo(pdf[0] or "factura.pdf", pdf[1], "application/pdf")
+    ref_xml = guardar_archivo(xml[0] or "factura.xml", xml[1], "application/xml")
+    t = ahora()
+    if previa:
+        ejecutar("""UPDATE solicitudes SET estado='facturado', lineas=?, monto=?, factura_pdf=?, factura_xml=?, cfdi=?,
+                    actualizada=? WHERE id=?""",
+                 (json.dumps(lineas), monto, ref_pdf, ref_xml, json.dumps(cfdi), t, previa["id"]))
+        sid = previa["id"]
+        _evento(sid, actor, "referidor", "rechazado", "facturado", "Factura corregida")
+    else:
+        sid = uuid.uuid4().hex
+        periodo = "anterior" if tipo == "anterior" else f"{hoy.year:04d}-{hoy.month:02d}"
+        ejecutar("""INSERT INTO solicitudes (id, tipo, referidor_id, referidor_email, referidor_nombre, inmobiliaria, periodo,
+                    monto, lineas, estado, factura_pdf, factura_xml, cfdi, creada, actualizada)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'facturado', ?, ?, ?, ?, ?)""",
+                 (sid, tipo, referidor["id"], referidor["email"], referidor["nombre"], referidor.get("inmobiliaria"),
+                  periodo, monto, json.dumps(lineas), ref_pdf, ref_xml, json.dumps(cfdi), t, t))
+        _evento(sid, actor, "referidor", None, "facturado")
+    return solicitud(sid)
+
+
+def limite_lineas(s, cfg):
+    """Último día para cobrar lo incluido en la factura (el plazo más próximo de sus meses)."""
+    if s["tipo"] == "anterior":
+        return date.fromisoformat(cfg["programa_anterior_limite"])
+    fechas = [date.fromisoformat(l["cobro_hasta"]) for l in s["lineas"] if l.get("cobro_hasta")]
+    return min(fechas) if fechas else None
+
+
+def _exigir(s, estado):
+    if not s:
+        raise ErrorFlujo("No existe la solicitud.")
+    if s["estado"] != estado:
+        raise ErrorFlujo(f"La solicitud está en '{s['estado']}', no en '{estado}'.")
+
+
+def aprobar(cfg, hoy, sid, actor, rol, enlace=""):
+    s = solicitud(sid)
+    _exigir(s, "facturado")
+    desde, hasta = hoy + timedelta(days=cfg["pago_dias_min"]), hoy + timedelta(days=cfg["pago_dias_max"])
+    ejecutar("UPDATE solicitudes SET estado='aprobado', aprobada=?, pago_desde=?, pago_hasta=?, actualizada=? WHERE id=?",
+             (hoy.isoformat(), desde.isoformat(), hasta.isoformat(), ahora(), sid))
+    _evento(sid, actor, rol, "facturado", "aprobado")
+    avisar(s["referidor_email"], f"Tu factura de {_periodo_txt(s)} por {_mxn(s['monto'])} fue aprobada. "
+           f"Se paga a más tardar el {hasta:%d/%m/%Y}.", sid, "Tu factura de referidos fue aprobada",
+           _html("Tu factura fue aprobada", [f"Periodo: {_periodo_txt(s)}", f"Monto: {_mxn(s['monto'])}",
+                                             f"Fecha estimada de pago: entre el {desde:%d/%m/%Y} y el {hasta:%d/%m/%Y}."], enlace))
+    return solicitud(sid)
+
+
+def rechazar(cfg, hoy, sid, actor, rol, motivo, enlace=""):
+    motivo = (motivo or "").strip()
+    if len(motivo) < 10:
+        raise ErrorFlujo("Escribe el motivo del rechazo (mínimo 10 caracteres) para que el asesor sepa qué corregir.")
+    s = solicitud(sid)
+    _exigir(s, "facturado")
+    plazo = limite_lineas(s, cfg)
+    limite = max(plazo or hoy, calculo.dias_habiles(hoy, cfg["dias_habiles_para_corregir"]))
+    ejecutar("UPDATE solicitudes SET estado='rechazado', motivo_rechazo=?, limite_correccion=?, actualizada=? WHERE id=?",
+             (motivo, limite.isoformat(), ahora(), sid))
+    _evento(sid, actor, rol, "facturado", "rechazado", motivo)
+    avisar(s["referidor_email"], f"Tu factura de {_periodo_txt(s)} fue rechazada.\nMotivo: {motivo}\n"
+           f"Corrígela a más tardar el {limite:%d/%m/%Y}.", sid, "Corrige tu factura de referidos",
+           _html("Tu factura fue rechazada", [f"Periodo: {_periodo_txt(s)}", f"Motivo: {motivo}",
+                                              f"Sube la factura corregida a más tardar el {limite:%d/%m/%Y}."], enlace))
+    return solicitud(sid)
+
+
+def marcar_pagado(sid, actor, fecha_pago, referencia, comprobante=None, enlace=""):
+    s = solicitud(sid)
+    _exigir(s, "aprobado")
+    if not fecha_pago:
+        raise ErrorFlujo("Indica la fecha de pago.")
+    try:
+        f = date.fromisoformat(fecha_pago)
+    except ValueError:
+        raise ErrorFlujo("Fecha de pago inválida.")
+    ref_c = guardar_archivo(comprobante[0] or "comprobante", comprobante[1], comprobante[2]) if comprobante else None
+    ejecutar("UPDATE solicitudes SET estado='pagado', pagada=?, pago_referencia=?, comprobante=?, actualizada=? WHERE id=?",
+             (f.isoformat(), (referencia or "").strip(), ref_c, ahora(), sid))
+    _evento(sid, actor, "finanzas", "aprobado", "pagado", (referencia or "").strip() or None)
+    avisar(s["referidor_email"], f"Pagamos tu factura de {_periodo_txt(s)} por {_mxn(s['monto'])} el {f:%d/%m/%Y}.",
+           sid, "Pagamos tu beneficio de referidos",
+           _html("Tu beneficio fue pagado", [f"Periodo: {_periodo_txt(s)}", f"Monto: {_mxn(s['monto'])}",
+                                             f"Fecha de pago: {f:%d/%m/%Y}"] + ([f"Referencia: {referencia}"] if referencia else []), enlace))
+    return solicitud(sid)
+
+
+def regresar_a_revision(sid, actor):
+    """Finanzas deshace una aprobación hecha por error (antes de pagar)."""
+    s = solicitud(sid)
+    _exigir(s, "aprobado")
+    ejecutar("UPDATE solicitudes SET estado='facturado', aprobada=NULL, pago_desde=NULL, pago_hasta=NULL, actualizada=? WHERE id=?",
+             (ahora(), sid))
+    _evento(sid, actor, "finanzas", "aprobado", "facturado", "Aprobación revertida")
+    return solicitud(sid)
+
+
+def _periodo_txt(s):
+    if s["tipo"] == "anterior":
+        return "programa anterior"
+    meses = sorted({l["mes"] for l in s["lineas"] if l.get("mes")})
+    return "beneficios de " + ", ".join(calculo.etiqueta_mes(m) for m in meses) if meses else "beneficios"
+
+
+def _mxn(v):
+    return f"${v:,.2f}"
+
+
+def _html(titulo, filas, enlace):
+    from html import escape
+    li = "".join(f'<li style="white-space:pre-line">{escape(f)}</li>' for f in filas)
+    btn = f'<p><a href="{escape(enlace)}">Ver en la herramienta de referidos</a></p>' if enlace else ""
+    return (f'<div style="font-family:Nunito Sans,Arial,sans-serif;color:#212322">'
+            f'<h2 style="font-family:Georgia,serif;font-weight:400">{escape(titulo)}</h2><ul>{li}</ul>{btn}'
+            f'<p style="color:#B7B7B7;font-size:12px">Programa de referidos · Pulppo</p></div>')

@@ -1,0 +1,22 @@
+{
+  "inicio_programa": "2026-11",
+  "umbral_profesional": 200000,
+  "umbral_elite": 600000,
+  "porcentaje_por_nivel": {"1": 0.03, "2": 0.02, "3": 0.01},
+  "tope_por_periodo": 600000,
+  "meses_por_periodo": 12,
+  "dia_limite_factura": 10,
+  "meses_para_cobrar": 2,
+  "dias_habiles_para_corregir": 5,
+  "pago_dias_min": 30,
+  "pago_dias_max": 45,
+  "programa_anterior_limite": "2026-12-20",
+  "inmobiliarias_excluidas": ["Circulo Bienes Raices", "Ancona Plus", "Inmobiliaria Demo"],
+  "finanzas": ["laura@pulppo.com", "mitchellmonserrat@tuhabi.mx"],
+  "excepciones_iniciales": [
+    "joshua@pulppo.com",
+    "carlos.hernandez@pulppo.com",
+    "daniela.gonzalez@pulppo.com",
+    "rodrigo.ortega@pulppo.com"
+  ]
+}

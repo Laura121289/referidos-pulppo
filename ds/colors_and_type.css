@@ -1,0 +1,224 @@
+/* ============================================================
+   Pulppo Design System — colors & type tokens
+   Fuente única de verdad: DESIGN.md (mantener sincronizado).
+
+   Sistema de dos capas:
+     1. PRIMITIVOS — valores físicos (hex, hsl, ttf weights)
+     2. SEMÁNTICOS — intención de uso (text-primary, surface-card…)
+
+   Reglas duras:
+     · Solo 7 colores oficiales.
+     · Headings SIEMPRE Heldane Text Regular (EB Garamond como fallback).
+     · Nunca itálica, nunca bold para headings.
+     · Sin sombras de ningún tipo en ningún elemento.
+     · Tamaños enteros, nunca decimales.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   @font-face — fuentes oficiales locales
+   ------------------------------------------------------------ */
+
+
+
+/* Disponible pero NUNCA usar para headings — sólo body fallback decorativo */
+
+
+
+
+
+
+/* Nunito Sans · body / tags / captions */
+@font-face {
+  font-family: "Nunito Sans";
+  src: url("fonts/NunitoSans-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nunito Sans";
+  src: url("fonts/NunitoSans-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nunito Sans";
+  src: url("fonts/NunitoSans-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nunito Sans";
+  src: url("fonts/NunitoSans-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nunito Sans";
+  src: url("fonts/NunitoSans-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ------------------------------------------------------------
+   TOKENS PRIMITIVOS
+   ------------------------------------------------------------ */
+
+:root {
+  /* --- Color · 7 oficiales --- */
+  --color-soft-black: #212322;
+  --color-white:      #FFFFFF;
+  --color-yellow:     #F6BE00;
+  --color-gray:       #B7B7B7;
+  --color-light-gray: #F3F3F3;
+  --color-red:        #A52003;
+  --color-sea-green:  #529999;
+
+  /* --- Familias tipográficas ---
+     Heldane Text es la fuente oficial. EB Garamond es el fallback
+     documentado (Google Fonts) cuando Heldane no está disponible. */
+  --font-display: "EB Garamond", Georgia, serif;
+  --font-body:    "Nunito Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* --- Pesos --- */
+  --weight-light:   300;
+  --weight-regular: 400;
+  --weight-bold:    700;
+
+  /* --- Tamaños · enteros, nunca decimales ---
+     Sistema nativo en puntos (1pt ≈ 1.333px en pantalla a 96dpi).
+     Se exponen tanto las variables en pt (origen) como en px (uso digital). */
+  --size-9:  9pt;   /* ≈ 12px */
+  --size-11: 11pt;  /* ≈ 15px */
+  --size-12: 12pt;  /* ≈ 16px */
+  --size-20: 20pt;  /* ≈ 27px */
+  --size-28: 28pt;  /* ≈ 37px */
+  --size-40: 40pt;  /* ≈ 53px */
+  --size-56: 56pt;  /* ≈ 75px — sólo Stat Row */
+
+  --leading-headings: 1.2;
+  --leading-body:     1.4;
+
+  /* --- Spacing · valores observados (no escala) --- */
+  --space-edge:        0.5in;   /* margen mínimo desde borde de pieza */
+  --space-card-gap:    0.10in;  /* gap entre cards en Card Grid */
+  --space-logo-margin: 0.4in;   /* margen logo símbolo, formatos no-slide */
+  --logo-size:         0.5in;   /* tamaño logo símbolo en slide 16:9 */
+  --line-accent:       1pt;     /* línea acento amarilla */
+  --line-divider:      1pt;     /* divider neutral */
+  --line-axis:         0.5pt;   /* ejes y grids de gráficas */
+  --icon-size:         32px;    /* iconos en Icon List */
+  --icon-stroke:       1.5pt;
+}
+
+/* ------------------------------------------------------------
+   TOKENS SEMÁNTICOS
+   ------------------------------------------------------------ */
+
+:root {
+  /* --- Texto --- */
+  --text-primary:   var(--color-soft-black);
+  --text-on-dark:   var(--color-white);
+  --text-secondary: var(--color-gray);
+
+  /* --- Superficies --- */
+  --surface-default: var(--color-white);
+  --surface-dark:    var(--color-soft-black);
+  --surface-card:    var(--color-light-gray);
+
+  /* --- Acento (máx 10% superficie) --- */
+  --accent: var(--color-yellow);
+
+  /* --- Divisores --- */
+  --divider-accent:  var(--color-yellow);
+  --divider-neutral: var(--color-gray);
+
+  /* --- Feedback funcional · NUNCA decorativo --- */
+  --feedback-success: var(--color-sea-green);
+  --feedback-error:   var(--color-red);
+
+  /* --- Iconos --- */
+  --icon-default: var(--color-soft-black);
+  --icon-on-dark: var(--color-white);
+
+  /* --- Overlay sobre fotografía --- */
+  --overlay-dark-70: rgba(33, 35, 34, 0.7);
+}
+
+/* ------------------------------------------------------------
+   TIPOGRAFÍA SEMÁNTICA — utility classes
+   Usar como `class="h1"` o `class="body"` etc.
+   Headings SIEMPRE Regular. Nunca subir a Bold para "verse fuerte" —
+   subir tamaño en su lugar.
+   ------------------------------------------------------------ */
+
+.h1, h1 {
+  font: var(--weight-regular) var(--size-40) / var(--leading-headings) var(--font-display);
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.h2, h2 {
+  font: var(--weight-regular) var(--size-28) / var(--leading-headings) var(--font-display);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.h3, h3 {
+  font: var(--weight-regular) var(--size-20) / var(--leading-headings) var(--font-display);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.stat {
+  font: var(--weight-regular) var(--size-56) / var(--leading-headings) var(--font-display);
+  color: var(--text-primary);
+}
+
+.tag, .eyebrow {
+  font: var(--weight-bold) var(--size-11) / var(--leading-headings) var(--font-body);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+}
+
+.body, p {
+  font: var(--weight-regular) var(--size-12) / var(--leading-body) var(--font-body);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.body-list {
+  font: var(--weight-regular) var(--size-11) / var(--leading-body) var(--font-body);
+  color: var(--text-primary);
+}
+
+.caption {
+  font: var(--weight-light) var(--size-9) / var(--leading-body) var(--font-body);
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------
+   RESETS BÁSICOS — sin sombras NUNCA
+   ------------------------------------------------------------ */
+
+* {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+body {
+  background: var(--surface-default);
+  color: var(--text-primary);
+  font: var(--weight-regular) var(--size-12) / var(--leading-body) var(--font-body);
+  margin: 0;
+}

@@ -1,0 +1,5 @@
+{
+  "functions": { "api/index.py": { "maxDuration": 60, "includeFiles": "{*.py,*.json,static/**,ds/**}" } },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }],
+  "crons": [{ "path": "/api/cron/regalias", "schedule": "0 13 * * *" }]
+}

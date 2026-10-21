@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Referidos · Pulppo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400&display=swap">
+<link rel="stylesheet" href="/ds/colors_and_type.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="barra">
+  <div class="barra-in">
+    <span class="marca">Referidos</span>
+    <nav class="tabs" id="tabs" hidden></nav>
+    <div class="sesion" id="sesion" hidden><span id="quien"></span><button type="button" class="link" id="salir">Salir</button></div>
+    <img class="logo" src="/ds/assets/pulppo-symbol-black.png" alt="Pulppo">
+  </div>
+</header>
+
+<main id="app" class="pagina">
+  <p class="muted">Cargando…</p>
+</main>
+
+<section id="login" class="pagina" hidden>
+  <p class="eyebrow">Programa de referidos</p>
+  <h1>Tus beneficios por referir</h1>
+  <p class="body muted">Consulta lo que tienes por cobrar, sube tu factura y sigue su estado hasta el pago.</p>
+  <div class="acento"></div>
+  <div class="login-cajas">
+    <div class="caja">
+      <h3>Con tu cuenta de Google</h3>
+      <div id="google-btn"></div>
+      <p class="nota" id="sin-google" hidden>El acceso con Google aún no está configurado.</p>
+    </div>
+    <form class="caja" id="form-enlace" autocomplete="on">
+      <h3>Con un enlace a tu correo</h3>
+      <label class="campo"><span class="tag">Correo registrado en Pulppo</span><input id="correo" type="email" required></label>
+      <button type="submit" class="btn">Enviar enlace</button>
+      <p class="nota" id="enlace-ok" hidden>Si tu correo está registrado, te llegará un enlace válido por 30 minutos.</p>
+    </form>
+  </div>
+  <p class="nota error" id="login-error" hidden></p>
+  <form class="caja local" id="form-local" hidden>
+    <h3>Uso local</h3>
+    <label class="campo"><span class="tag">Entrar como (correo)</span><input id="correo-local" type="email" required></label>
+    <button type="submit" class="btn btn-sec">Entrar</button>
+  </form>
+</section>
+
+<dialog id="dlg" class="dialogo"></dialog>
+<!--CONFIG-->
+<script src="/static/app.js"></script>
+</body>
+</html>

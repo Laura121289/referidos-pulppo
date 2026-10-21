@@ -1,0 +1,6 @@
+.vercel/
+.secretos.json
+.env
+__pycache__/
+.DS_Store
+datos-app/
