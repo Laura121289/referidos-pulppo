@@ -730,6 +730,11 @@ def api_diagnostico():
                                                  "GOOGLE_CLIENT_ID", "RESEND_API_KEY", "SECRET_KEY", "CRON_SECRET")}
     uri = os.environ.get("MONGODB_URI", "")
     out["mongo_uri_empieza_bien"] = uri.startswith(("mongodb://", "mongodb+srv://"))
+    import hashlib
+    out["mongo_uri_huella"] = hashlib.sha256(uri.encode()).hexdigest()[:8]
+    out["mongo_uri_espacios"] = uri != uri.strip() or " " in uri
+    out["variables_blob_mongo"] = sorted(k for k in os.environ if "BLOB" in k.upper() or "MONGO" in k.upper())
+    out["entorno"] = os.environ.get("VERCEL_ENV")
     t = time.time()
     try:
         from pulppo_db import get_client
