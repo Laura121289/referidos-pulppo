@@ -729,7 +729,7 @@ def api_diagnostico():
     out = {v: bool(os.environ.get(v)) for v in ("MONGODB_URI", "DATABASE_URL", "POSTGRES_URL", "BLOB_READ_WRITE_TOKEN",
                                                  "GOOGLE_CLIENT_ID", "RESEND_API_KEY", "SECRET_KEY", "CRON_SECRET")}
     uri = os.environ.get("MONGODB_URI", "")
-    out["mongo_uri_forma"] = (uri.split("://")[0] + "://…@" + uri.split("@")[-1].split("?")[0]) if "@" in uri else "sin @"
+    out["mongo_uri_empieza_bien"] = uri.startswith(("mongodb://", "mongodb+srv://"))
     t = time.time()
     try:
         from pulppo_db import get_client
@@ -737,7 +737,7 @@ def api_diagnostico():
         c.admin.command("ping")
         out["mongo"] = f"ok ({c['pulppo'].agents.estimated_document_count()} agentes)"
     except Exception as e:  # noqa: BLE001
-        out["mongo"] = f"{type(e).__name__}: {str(e)[:300]}"
+        out["mongo"] = type(e).__name__ + ": " + str(e)[:300].replace(uri, "<MONGODB_URI>")
     out["segundos"] = round(time.time() - t, 1)
     return jsonify(out)
 
