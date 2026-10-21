@@ -721,6 +721,26 @@ def api_cron():
     return jsonify(ok=True)
 
 
+@app.get("/api/cron/diagnostico")
+def api_diagnostico():
+    """Qué variables hay y si Mongo responde (protegido con CRON_SECRET; nunca devuelve valores)."""
+    if EN_VERCEL and request.headers.get("Authorization") != f"Bearer {CRON_SECRET}":
+        abort(401)
+    out = {v: bool(os.environ.get(v)) for v in ("MONGODB_URI", "DATABASE_URL", "POSTGRES_URL", "BLOB_READ_WRITE_TOKEN",
+                                                 "GOOGLE_CLIENT_ID", "RESEND_API_KEY", "SECRET_KEY", "CRON_SECRET")}
+    uri = os.environ.get("MONGODB_URI", "")
+    out["mongo_uri_forma"] = (uri.split("://")[0] + "://…@" + uri.split("@")[-1].split("?")[0]) if "@" in uri else "sin @"
+    t = time.time()
+    try:
+        from pulppo_db import get_client
+        c = get_client()
+        c.admin.command("ping")
+        out["mongo"] = f"ok ({c['pulppo'].agents.estimated_document_count()} agentes)"
+    except Exception as e:  # noqa: BLE001
+        out["mongo"] = f"{type(e).__name__}: {str(e)[:300]}"
+    out["segundos"] = round(time.time() - t, 1)
+    return jsonify(out)
+
 if __name__ == "__main__":
     # Local: se reinicia solo al cambiar el código; misma liga, misma sesión (SECRET_KEY en .secretos.json) y mismos datos
     app.run(host="127.0.0.1", port=8060, debug=False, use_reloader=True,
