@@ -56,6 +56,24 @@ app.secret_key = _secreto("SECRET_KEY")
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=EN_VERCEL,
                   PERMANENT_SESSION_LIFETIME=timedelta(days=30), MAX_CONTENT_LENGTH=12 * 1024 * 1024)
 ENLACES = URLSafeTimedSerializer(app.secret_key, salt="enlace-acceso")
+
+
+def _ruta_original(wsgi):
+    """vercel.json manda todo a /api/index?__ruta=/<ruta original>: devolverle a Flask la ruta original."""
+    from urllib.parse import parse_qsl, urlencode
+
+    def envuelto(environ, start_response):
+        if environ.get("PATH_INFO", "").startswith("/api/index"):
+            qs = parse_qsl(environ.get("QUERY_STRING", ""), keep_blank_values=True)
+            ruta = next((v for k, v in qs if k == "__ruta"), None)
+            if ruta is not None:
+                environ["PATH_INFO"] = ruta if ruta.startswith("/") else "/" + ruta
+                environ["QUERY_STRING"] = urlencode([(k, v) for k, v in qs if k != "__ruta"])
+        return wsgi(environ, start_response)
+    return envuelto
+
+
+app.wsgi_app = _ruta_original(app.wsgi_app)
 almacen.iniciar(CFG)
 
 
