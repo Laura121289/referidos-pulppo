@@ -55,6 +55,8 @@ def _secreto(nombre):
 
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+BROKER_SSO_URL = os.environ.get("BROKER_SSO_URL", "")  # p. ej. https://broker.pulppo.com/referidos-sso
+PULPPO_API_URL = os.environ.get("PULPPO_API_URL", "https://api.pulppo.com")
 CRON_SECRET = os.environ.get("CRON_SECRET", "")
 app = Flask(__name__, static_folder=None)
 app.secret_key = _secreto("SECRET_KEY")
@@ -283,6 +285,23 @@ def auth_enlace_entrar(tok):
     return redirect("/")
 
 
+@app.get("/auth/sso")
+def auth_sso():
+    """Vuelta del login en broker.pulppo.com: canjea el key de un solo uso por el agente (como el Coach IA)."""
+    import requests
+    key = request.args.get("key", "")
+    if not key:
+        return redirect("/?error=sso")
+    try:
+        r = requests.post(f"{PULPPO_API_URL}/login/magic-link/exchange", json={"key": key}, timeout=15)
+        email = (r.json().get("agent") or {}).get("email", "") if r.ok else ""
+    except (requests.RequestException, ValueError):
+        email = ""
+    if not email or not _entrar(email):
+        return redirect("/?error=sso")
+    return redirect("/")
+
+
 @app.get("/auth/local")
 def auth_local():
     if EN_VERCEL:
@@ -305,7 +324,7 @@ def salir():
 @app.get("/")
 def inicio():
     html = (HERE / "static" / "index.html").read_text()
-    conf = {"googleClientId": GOOGLE_CLIENT_ID, "local": not EN_VERCEL}
+    conf = {"googleClientId": GOOGLE_CLIENT_ID, "brokerSsoUrl": BROKER_SSO_URL, "local": not EN_VERCEL}
     html = html.replace("<!--CONFIG-->", f"<script>window.CONFIG = {json.dumps(conf)};</script>")
     r = Response(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
