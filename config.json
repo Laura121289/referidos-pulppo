@@ -12,6 +12,7 @@
   "pago_dias_max": 45,
   "programa_anterior_limite": "2026-12-20",
   "bono_desde": "2026-10-01",
+  "bono_operaciones_extra": ["2AC-OTIKZQVPB"],
   "bono_porcentaje": 0.05,
   "bono_comision_min": 5,
   "bono_meses_exclusiva": 6,

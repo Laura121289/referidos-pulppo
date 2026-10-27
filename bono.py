@@ -6,6 +6,7 @@
   Lado vendedor o productor: no aplica. Lo cobra el `buyer.broker`, sea asesor o Master Broker.
 - Se genera cuando la operación está concretada (`closed`) y se puede cobrar desde el mes siguiente al cierre, sin plazo.
   `paying` (en cobranza) espera a cerrarse. Cuentan los cierres desde `bono_desde` (1-oct-2026).
+  Excepción: `bono_operaciones_extra` (IDs de operación de meses pasados que no se pagaron; Laura, 27-oct-2026).
 - Una factura por operación, concepto "Bono 1.5.10 <ID de la operación>". Finanzas/KAM aprueban o rechazan; Finanzas paga.
 
 cargar(db, ...) lee Mongo; calcular(ops, ...) aplica estados sin Mongo.
@@ -62,7 +63,7 @@ def cargar(db, cfg, excluidas=()):
         {"internalId": 1, "contract.comission": 1, "contract.ivaIncluded": 1, "contract.status": 1, "contract.exclusive": 1,
          "address.neighborhood.name": 1})}
     q = {"property._id": {"$in": list(props)}, "status.last": {"$in": ["closed", "paying"]}, "side": {"$in": ["both", "buyer"]},
-         "closedAt": {"$gte": ini}}
+         "$or": [{"closedAt": {"$gte": ini}}, {"id": {"$in": cfg.get("bono_operaciones_extra", [])}}]}
     ops = list(db.operations.find(q, {"id": 1, "side": 1, "status.last": 1, "closedAt": 1, "comission": 1, "closeValue": 1,
                                       "buyer.broker._id": 1, "buyer.company": 1, "buyer.contact._id": 1, "property._id": 1}))
     bids = {_get(o, ("buyer", "broker", "_id")) for o in ops} - {None}
