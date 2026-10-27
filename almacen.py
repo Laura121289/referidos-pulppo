@@ -290,8 +290,8 @@ def _uuid_usado(uuid_cfdi, excepto):
 
 def facturar(cfg, hoy, referidor, tipo, lineas, pdf, xml, actor, corregir=None, rol="referidor"):
     """El referidor sube su factura con todo lo disponible (nueva) o corrige una rechazada (corregir = id).
-    Un admin (rol finanzas/kam) puede subirla en su nombre, sin límite de tiempo (Laura, 27-oct-2026): queda en el historial
-    con su correo y rol.
+    Un admin (rol finanzas/kam) puede subirla en su nombre y fuera de la ventana del 1 al 10, pero lo vencido no revive
+    (Laura, 27-oct-2026): queda en el historial con su correo y rol.
     referidor = {id, email, nombre, inmobiliaria}; lineas = [{id, monto, mes, cobro_hasta, ...}]; pdf/xml = (nombre, bytes).
     Programa nuevo: puede haber varias facturas en el mismo mes (lo que se libera después va en otra)."""
     previa = None
@@ -301,12 +301,12 @@ def facturar(cfg, hoy, referidor, tipo, lineas, pdf, xml, actor, corregir=None, 
             raise ErrorFlujo("No existe la factura a corregir.")
         if previa["estado"] != "rechazado":
             raise ErrorFlujo("Solo se corrige una factura rechazada.")
-        if previa["limite_correccion"] and hoy > date.fromisoformat(previa["limite_correccion"]) and rol == "referidor":
+        if previa["limite_correccion"] and hoy > date.fromisoformat(previa["limite_correccion"]):
             raise ErrorFlujo("Se venció el plazo para corregir esta factura.")
     elif tipo == "anterior":
         if any(x["estado"] != "rechazado" for x in solicitudes(referidor["id"], "anterior")):
             raise ErrorFlujo("Ya enviaste la factura del programa anterior.")
-        if hoy > date.fromisoformat(cfg["programa_anterior_limite"]) and rol == "referidor":
+        if hoy > date.fromisoformat(cfg["programa_anterior_limite"]):
             raise ErrorFlujo("El plazo para cobrar el programa anterior ya venció.")
     elif tipo == "bono":  # una factura por operación
         ops = {l["id"] for l in lineas}

@@ -321,7 +321,7 @@ function anteriorHTML(A, ro) {
     accion = s.estado === "rechazado"
       ? `<div class="caja alerta pre" style="margin-top:16px"><b>Rechazada:</b> ${esc(s.motivo_rechazo)} Corrige a más tardar el ${fecha(s.limite_correccion)}.${formFactura("anterior", "Subir factura corregida", s.id)}</div>`
       : `<p style="margin-top:16px">${chip(s.estado)} Solicitud por ${mxn(s.monto)} enviada el ${fecha(s.creada)}.</p>`;
-  } else if (A.disponible > 0 && (A.abierto || COMO)) {  // el admin no tiene límite de tiempo
+  } else if (A.disponible > 0 && A.abierto) {
     accion = `<div class="caja acento-izq" style="margin-top:16px"><p>Puedes cobrar <b>${mxn(A.disponible)}</b> hasta el <b>${fecha(A.limite)}</b>. Después se pierde.
       Factura por ese monto más IVA con el concepto “Comisiones: programa referidos”.</p>${formFactura("anterior", "Enviar factura")}</div>`;
   }
