@@ -18,7 +18,6 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory, session
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 HERE = Path(__file__).resolve().parent
 for p in (HERE, HERE.parents[1] / "base-de-datos" / "lib"):
@@ -54,7 +53,6 @@ def _secreto(nombre):
     return d[nombre]
 
 
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 BROKER_SSO_URL = os.environ.get("BROKER_SSO_URL", "")  # p. ej. https://broker.pulppo.com/referidos-sso
 PULPPO_API_URL = os.environ.get("PULPPO_API_URL", "https://api.pulppo.com")
 CRON_SECRET = os.environ.get("CRON_SECRET", "")
@@ -62,7 +60,6 @@ app = Flask(__name__, static_folder=None)
 app.secret_key = _secreto("SECRET_KEY")
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=EN_VERCEL,
                   PERMANENT_SESSION_LIFETIME=timedelta(days=30), MAX_CONTENT_LENGTH=12 * 1024 * 1024)
-ENLACES = URLSafeTimedSerializer(app.secret_key, salt="enlace-acceso")
 
 
 def _ruta_original(wsgi):
@@ -246,45 +243,6 @@ def _entrar(email, nombre=None):
     return session["usuario"]
 
 
-@app.post("/auth/google")
-def auth_google():
-    from google.auth.transport import requests as greq
-    from google.oauth2 import id_token
-    cred = (request.get_json(silent=True) or {}).get("credential", "")
-    try:
-        info = id_token.verify_oauth2_token(cred, greq.Request(), GOOGLE_CLIENT_ID)
-    except Exception:
-        abort(401)
-    if not info.get("email_verified"):
-        abort(403)
-    u = _entrar(info["email"], info.get("name"))
-    if not u:
-        return jsonify(error="Ese correo no está registrado como asesor en Pulppo."), 403
-    return jsonify(u)
-
-
-@app.post("/auth/enlace")
-def auth_enlace():
-    """Envía un enlace de acceso (30 min) al correo del asesor. Responde igual exista o no, para no revelar correos."""
-    email = str((request.get_json(silent=True) or {}).get("email", "")).strip().lower()
-    if "@" in email and (agente_por_email(email) or roles_de(email)):
-        tok = ENLACES.dumps(email)
-        url = f"{request.host_url.rstrip('/')}/auth/enlace/{tok}"
-        almacen.enviar_correo(email, "Tu acceso a Referidos Pulppo", almacen._html(
-            "Entra a tus beneficios de referidos", ["El enlace vence en 30 minutos y solo sirve para tu cuenta."], url))
-    return jsonify(ok=True)
-
-
-@app.get("/auth/enlace/<tok>")
-def auth_enlace_entrar(tok):
-    try:
-        email = ENLACES.loads(tok, max_age=1800)
-    except (BadSignature, SignatureExpired):
-        return redirect("/?error=enlace")
-    _entrar(email)
-    return redirect("/")
-
-
 @app.get("/auth/sso")
 def auth_sso():
     """Vuelta del login en broker.pulppo.com: canjea el key de un solo uso por el agente (como el Coach IA)."""
@@ -324,7 +282,7 @@ def salir():
 @app.get("/")
 def inicio():
     html = (HERE / "static" / "index.html").read_text()
-    conf = {"googleClientId": GOOGLE_CLIENT_ID, "brokerSsoUrl": BROKER_SSO_URL, "local": not EN_VERCEL}
+    conf = {"brokerSsoUrl": BROKER_SSO_URL, "local": not EN_VERCEL}
     html = html.replace("<!--CONFIG-->", f"<script>window.CONFIG = {json.dumps(conf)};</script>")
     r = Response(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
@@ -997,7 +955,7 @@ def api_diagnostico():
     if EN_VERCEL and request.headers.get("Authorization") != f"Bearer {CRON_SECRET}":
         abort(401)
     out = {v: bool(os.environ.get(v)) for v in ("MONGODB_URI", "DATABASE_URL", "POSTGRES_URL", "BLOB_READ_WRITE_TOKEN",
-                                                 "GOOGLE_CLIENT_ID", "RESEND_API_KEY", "SECRET_KEY", "CRON_SECRET")}
+                                                 "BROKER_SSO_URL", "RESEND_API_KEY", "SECRET_KEY", "CRON_SECRET")}
     uri = os.environ.get("MONGODB_URI", "")
     out["mongo_uri_empieza_bien"] = uri.startswith(("mongodb://", "mongodb+srv://"))
     import hashlib

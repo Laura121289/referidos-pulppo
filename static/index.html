@@ -33,16 +33,10 @@
   <div class="acento"></div>
   <div class="login-cajas">
     <div class="caja">
-      <h3>Con tu cuenta de Google</h3>
-      <div id="google-btn"></div>
-      <p class="nota" id="sin-google" hidden>El acceso con Google aún no está configurado.</p>
+      <h3>Con tu cuenta de Pulppo</h3>
+      <a class="btn" id="sso-btn" hidden>Entrar con Pulppo</a>
+      <p class="nota" id="sin-sso" hidden>El acceso aún no está configurado.</p>
     </div>
-    <form class="caja" id="form-enlace" autocomplete="on">
-      <h3>Con un enlace a tu correo</h3>
-      <label class="campo"><span class="tag">Correo registrado en Pulppo</span><input id="correo" type="email" required></label>
-      <button type="submit" class="btn">Enviar enlace</button>
-      <p class="nota" id="enlace-ok" hidden>Si tu correo está registrado, te llegará un enlace válido por 30 minutos.</p>
-    </form>
   </div>
   <p class="nota error" id="login-error" hidden></p>
   <form class="caja local" id="form-local" hidden>
