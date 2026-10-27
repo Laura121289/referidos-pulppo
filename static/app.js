@@ -114,7 +114,7 @@ async function inicio() {
 document.addEventListener("click", (e) => { const t = e.target.closest("[data-prog]"); if (t) abrir(t.dataset.prog); });
 
 function mostrarLogin() {
-  // Login vía broker.pulppo.com (como el Coach IA): rebota una sola vez por pestaña; si volvemos sin sesión, queda el login de acá.
+  // Login vía broker.pulppo.com (como el Coach IA): rebota una sola vez por pestaña; si volvemos sin sesión, queda el botón.
   const errorUrl = new URLSearchParams(location.search).get("error");
   if (CONFIG.brokerSsoUrl && !errorUrl) {
     let rebotado = false;
@@ -122,33 +122,20 @@ function mostrarLogin() {
     if (!rebotado) return location.replace(CONFIG.brokerSsoUrl);
   }
   $("#app").hidden = true; $("#login").hidden = false; $("#tabs").hidden = true; $("#sesion").hidden = true;
-  if (errorUrl === "enlace") error("El enlace venció o no es válido. Pide uno nuevo.");
   if (errorUrl === "sso") error("No pudimos entrar con tu cuenta de Pulppo. Intenta de nuevo.");
   if (CONFIG.local) $("#form-local").hidden = false;
-  if (!CONFIG.googleClientId) { $("#sin-google").hidden = false; return; }
-  const s = Object.assign(document.createElement("script"), { src: "https://accounts.google.com/gsi/client", async: true });
-  s.onload = () => {
-    google.accounts.id.initialize({ client_id: CONFIG.googleClientId, callback: entrarGoogle, ux_mode: "popup" });
-    google.accounts.id.renderButton($("#google-btn"), { theme: "outline", size: "large", text: "continue_with", shape: "rectangular", locale: "es" });
-  };
-  document.head.appendChild(s);
+  if (!CONFIG.brokerSsoUrl) { $("#sin-sso").hidden = false; return; }
+  $("#sso-btn").href = CONFIG.brokerSsoUrl; $("#sso-btn").hidden = false;
 }
 
-async function entrarGoogle({ credential }) {
-  const r = await fetch("/auth/google", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential }) });
-  if (r.ok) return iniciar();
-  const d = await r.json().catch(() => ({}));
-  error(d.error || "No se pudo iniciar sesión. Intenta de nuevo.");
-}
 function error(msg) { $("#login-error").textContent = msg; $("#login-error").hidden = false; }
 
-$("#form-enlace").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  await fetch("/auth/enlace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: $("#correo").value }) });
-  $("#enlace-ok").hidden = false;
-});
 $("#form-local").addEventListener("submit", (e) => { e.preventDefault(); location.href = `/auth/local?email=${encodeURIComponent($("#correo-local").value)}`; });
-$("#salir").addEventListener("click", async () => { await fetch("/auth/salir", { method: "POST" }); location.href = "/"; });
+$("#salir").addEventListener("click", async () => {
+  await fetch("/auth/salir", { method: "POST" });
+  try { sessionStorage.setItem("sso_rebote", "1"); } catch { /* sin almacenamiento */ }  // si no, broker lo vuelve a loguear solo
+  location.href = "/";
+});
 $("#tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) ir(b.dataset.tab); });
 $("#marca").addEventListener("click", () => YO && inicio());
 

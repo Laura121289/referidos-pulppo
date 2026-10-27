@@ -1,6 +1,5 @@
 flask>=3.0
 pymongo>=4.6
 python-dotenv>=1.0
-google-auth>=2.29
 requests>=2.31
 psycopg[binary]>=3.1
