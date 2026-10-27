@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS solicitudes (
   inmobiliaria TEXT, periodo TEXT NOT NULL, monto DOUBLE PRECISION NOT NULL, lineas TEXT NOT NULL, estado TEXT NOT NULL,
   factura_pdf TEXT, factura_xml TEXT, cfdi TEXT, motivo_rechazo TEXT, limite_correccion TEXT,
   creada TEXT NOT NULL, actualizada TEXT NOT NULL, aprobada TEXT, pago_desde TEXT, pago_hasta TEXT,
-  pagada TEXT, pago_referencia TEXT, comprobante TEXT
+  pagada TEXT, pago_referencia TEXT, comprobante TEXT, pago_estimado TEXT
 );
 CREATE TABLE IF NOT EXISTS eventos (
   id TEXT PRIMARY KEY, solicitud_id TEXT NOT NULL, fecha TEXT NOT NULL, actor_email TEXT, actor_rol TEXT,
@@ -83,6 +83,12 @@ def iniciar(cfg):
     with _conn() as c:
         for st in [s.strip() for s in ESQUEMA.split(";") if s.strip()]:
             c.cursor().execute(st)
+    # Columnas agregadas después de crear la tabla (bases ya existentes)
+    for col in ("pago_estimado",):
+        try:
+            ejecutar(f"ALTER TABLE solicitudes ADD COLUMN {col} TEXT")
+        except Exception:  # noqa: BLE001 — ya existe
+            pass
     if not ejecutar("SELECT email FROM excepciones LIMIT 1"):
         for e in cfg.get("excepciones_iniciales", []):
             agregar_excepcion(e, "config.json")
@@ -165,26 +171,46 @@ def avisar(email, texto, solicitud_id=None, asunto=None, html=None):
         enviar_correo(email, asunto, html or f"<p>{texto}</p>")
 
 
-def enviar_correo(para, asunto, html):
+def enviar_correo(para, asunto, html, adjuntos=(), estricto=False):
+    """adjuntos = [(nombre, bytes)]. estricto: si falla, se avisa a quien lo envió (en los avisos automáticos no)."""
     if not RESEND_KEY:
         LOCAL.mkdir(exist_ok=True)
         with open(LOCAL / "correos.log", "a") as f:
-            f.write(json.dumps({"fecha": ahora(), "para": para, "asunto": asunto, "html": html}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"fecha": ahora(), "para": para, "asunto": asunto, "html": html,
+                                "adjuntos": [n for n, _ in adjuntos]}, ensure_ascii=False) + "\n")
         return
+    import base64
     import requests
+    cuerpo = {"from": REMITENTE, "to": [para], "subject": asunto, "html": html}
+    if adjuntos:
+        cuerpo["attachments"] = [{"filename": n, "content": base64.b64encode(b).decode()} for n, b in adjuntos]
     try:
         requests.post("https://api.resend.com/emails", timeout=20, headers={"Authorization": f"Bearer {RESEND_KEY}"},
-                      json={"from": REMITENTE, "to": [para], "subject": asunto, "html": html}).raise_for_status()
+                      json=cuerpo).raise_for_status()
     except Exception as e:  # el aviso en la herramienta ya quedó; el correo no debe tumbar la operación
         print("Correo no enviado:", para, asunto, e)
+        if estricto:
+            raise ErrorFlujo("No se pudo enviar el correo. Intenta de nuevo o descarga el desglose y envíalo tú.")
 
 
-def avisos(email):
-    return ejecutar("SELECT * FROM avisos WHERE email = ? ORDER BY fecha DESC LIMIT 50", (email,))
+def registrar_evento(sid, actor, rol, nota):
+    """Evento informativo (sin cambio de estado), p. ej. 'Desglose enviado por correo'."""
+    s = solicitud(sid)
+    _evento(sid, actor, rol, s["estado"], s["estado"], nota)
 
 
-def marcar_leidos(email):
-    ejecutar("UPDATE avisos SET leido = 1 WHERE email = ?", (email,))
+def _de_programa(programa):
+    """Avisos de un solo programa (los del bono son los de solicitudes tipo 'bono'; el resto es de referidos)."""
+    return ("solicitud_id IN (SELECT id FROM solicitudes WHERE tipo = 'bono')" if programa == "bono" else
+            "(solicitud_id IS NULL OR solicitud_id NOT IN (SELECT id FROM solicitudes WHERE tipo = 'bono'))")
+
+
+def avisos(email, programa):
+    return ejecutar(f"SELECT * FROM avisos WHERE email = ? AND {_de_programa(programa)} ORDER BY fecha DESC LIMIT 50", (email,))
+
+
+def marcar_leidos(email, programa):
+    ejecutar(f"UPDATE avisos SET leido = 1 WHERE email = ? AND {_de_programa(programa)}", (email,))
 
 
 # ---------------------------------------------------------------- excepciones y regalías
@@ -280,6 +306,10 @@ def facturar(cfg, hoy, referidor, tipo, lineas, pdf, xml, actor, corregir=None):
             raise ErrorFlujo("Ya enviaste la factura del programa anterior.")
         if hoy > date.fromisoformat(cfg["programa_anterior_limite"]):
             raise ErrorFlujo("El plazo para cobrar el programa anterior ya venció.")
+    elif tipo == "bono":  # una factura por operación
+        ops = {l["id"] for l in lineas}
+        if any(x["estado"] != "rechazado" and ops & {l["id"] for l in x["lineas"]} for x in solicitudes(referidor["id"], "bono")):
+            raise ErrorFlujo("Ya enviaste la factura del bono de esta operación.")
     if not previa and tipo == "mensual" and hoy.day > cfg["dia_limite_factura"]:
         raise ErrorFlujo(f"Las facturas se suben del 1 al {cfg['dia_limite_factura']} de cada mes.")
     if not lineas and not previa:
@@ -309,7 +339,8 @@ def facturar(cfg, hoy, referidor, tipo, lineas, pdf, xml, actor, corregir=None):
         _evento(sid, actor, "referidor", "rechazado", "facturado", "Factura corregida")
     else:
         sid = uuid.uuid4().hex
-        periodo = "anterior" if tipo == "anterior" else f"{hoy.year:04d}-{hoy.month:02d}"
+        periodo = ("anterior" if tipo == "anterior" else lineas[0]["operacion"] if tipo == "bono"
+                   else f"{hoy.year:04d}-{hoy.month:02d}")
         ejecutar("""INSERT INTO solicitudes (id, tipo, referidor_id, referidor_email, referidor_nombre, inmobiliaria, periodo,
                     monto, lineas, estado, factura_pdf, factura_xml, cfdi, creada, actualizada)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'facturado', ?, ?, ?, ?, ?)""",
@@ -323,6 +354,8 @@ def limite_lineas(s, cfg):
     """Último día para cobrar lo incluido en la factura (el plazo más próximo de sus meses)."""
     if s["tipo"] == "anterior":
         return date.fromisoformat(cfg["programa_anterior_limite"])
+    if s["tipo"] == "bono":
+        return None  # el bono no vence
     fechas = [date.fromisoformat(l["cobro_hasta"]) for l in s["lineas"] if l.get("cobro_hasta")]
     return min(fechas) if fechas else None
 
@@ -341,10 +374,10 @@ def aprobar(cfg, hoy, sid, actor, rol, enlace=""):
     ejecutar("UPDATE solicitudes SET estado='aprobado', aprobada=?, pago_desde=?, pago_hasta=?, actualizada=? WHERE id=?",
              (hoy.isoformat(), desde.isoformat(), hasta.isoformat(), ahora(), sid))
     _evento(sid, actor, rol, "facturado", "aprobado")
-    avisar(s["referidor_email"], f"Tu factura de {_periodo_txt(s)} por {_mxn(s['monto'])} fue aprobada. "
-           f"Se paga a más tardar el {hasta:%d/%m/%Y}.", sid, "Tu factura de referidos fue aprobada",
-           _html("Tu factura fue aprobada", [f"Periodo: {_periodo_txt(s)}", f"Monto: {_mxn(s['monto'])}",
-                                             f"Fecha estimada de pago: entre el {desde:%d/%m/%Y} y el {hasta:%d/%m/%Y}."], enlace))
+    cuando = f"Fecha de pago aproximada: {date.fromisoformat(pago_estimado(s, cfg)):%d/%m/%Y}."
+    avisar(s["referidor_email"], f"Tu factura de {_periodo_txt(s)} por {_mxn(s['monto'])} fue aprobada. {cuando}",
+           sid, f"Tu factura {_programa(s)} fue aprobada",
+           _html("Tu factura fue aprobada", [f"Periodo: {_periodo_txt(s)}", f"Monto: {_mxn(s['monto'])}", cuando], enlace, s))
     return solicitud(sid)
 
 
@@ -355,14 +388,15 @@ def rechazar(cfg, hoy, sid, actor, rol, motivo, enlace=""):
     s = solicitud(sid)
     _exigir(s, "facturado")
     plazo = limite_lineas(s, cfg)
-    limite = max(plazo or hoy, calculo.dias_habiles(hoy, cfg["dias_habiles_para_corregir"]))
+    limite = None if s["tipo"] == "bono" else max(plazo or hoy, calculo.dias_habiles(hoy, cfg["dias_habiles_para_corregir"]))
     ejecutar("UPDATE solicitudes SET estado='rechazado', motivo_rechazo=?, limite_correccion=?, actualizada=? WHERE id=?",
-             (motivo, limite.isoformat(), ahora(), sid))
+             (motivo, limite and limite.isoformat(), ahora(), sid))
     _evento(sid, actor, rol, "facturado", "rechazado", motivo)
+    plazo_txt = f"a más tardar el {limite:%d/%m/%Y}" if limite else "cuando la tengas"
     avisar(s["referidor_email"], f"Tu factura de {_periodo_txt(s)} fue rechazada.\nMotivo: {motivo}\n"
-           f"Corrígela a más tardar el {limite:%d/%m/%Y}.", sid, "Corrige tu factura de referidos",
+           f"Corrígela y vuelve a subirla {plazo_txt}.", sid, f"Corrige tu factura {_programa(s)}",
            _html("Tu factura fue rechazada", [f"Periodo: {_periodo_txt(s)}", f"Motivo: {motivo}",
-                                              f"Sube la factura corregida a más tardar el {limite:%d/%m/%Y}."], enlace))
+                                              f"Sube la factura corregida {plazo_txt}."], enlace, s))
     return solicitud(sid)
 
 
@@ -380,9 +414,35 @@ def marcar_pagado(sid, actor, fecha_pago, referencia, comprobante=None, enlace="
              (f.isoformat(), (referencia or "").strip(), ref_c, ahora(), sid))
     _evento(sid, actor, "finanzas", "aprobado", "pagado", (referencia or "").strip() or None)
     avisar(s["referidor_email"], f"Pagamos tu factura de {_periodo_txt(s)} por {_mxn(s['monto'])} el {f:%d/%m/%Y}.",
-           sid, "Pagamos tu beneficio de referidos",
-           _html("Tu beneficio fue pagado", [f"Periodo: {_periodo_txt(s)}", f"Monto: {_mxn(s['monto'])}",
-                                             f"Fecha de pago: {f:%d/%m/%Y}"] + ([f"Referencia: {referencia}"] if referencia else []), enlace))
+           sid, "Pagamos tu bono 1·5·10" if s["tipo"] == "bono" else "Pagamos tu beneficio de referidos",
+           _html("Tu bono fue pagado" if s["tipo"] == "bono" else "Tu beneficio fue pagado", [f"Periodo: {_periodo_txt(s)}", f"Monto: {_mxn(s['monto'])}",
+                                             f"Fecha de pago: {f:%d/%m/%Y}"] + ([f"Referencia: {referencia}"] if referencia else []), enlace, s))
+    return solicitud(sid)
+
+
+def pago_estimado(s, cfg):
+    """Fecha de pago aproximada: la que puso Finanzas o, por omisión, 45 días naturales (pago_dias_max) desde que se subió la factura."""
+    if s.get("pago_estimado"):
+        return s["pago_estimado"]
+    subida = datetime.fromisoformat(s["creada"]).astimezone(calculo.MX).date()
+    return (subida + timedelta(days=cfg["pago_dias_max"])).isoformat()
+
+
+def fecha_pago_estimada(sid, actor, fecha):
+    """Finanzas cambia la fecha de pago aproximada (vacía = regresa a la de omisión); el bróker la ve en su pantalla."""
+    s = solicitud(sid)
+    if not s:
+        raise ErrorFlujo("No existe la solicitud.")
+    if s["estado"] in ("pagado", "rechazado"):
+        raise ErrorFlujo("Esta factura ya no admite fecha de pago aproximada.")
+    if fecha:
+        try:
+            fecha = date.fromisoformat(fecha).isoformat()
+        except ValueError:
+            raise ErrorFlujo("Fecha inválida.")
+    ejecutar("UPDATE solicitudes SET pago_estimado=?, actualizada=? WHERE id=?", (fecha or None, ahora(), sid))
+    _evento(sid, actor, "finanzas", s["estado"], s["estado"],
+            f"Fecha de pago aproximada: {date.fromisoformat(fecha):%d/%m/%Y}" if fecha else "Fecha de pago aproximada regresó a la de omisión")
     return solicitud(sid)
 
 
@@ -396,7 +456,13 @@ def regresar_a_revision(sid, actor):
     return solicitud(sid)
 
 
+def _programa(s):
+    return "del bono 1·5·10" if s["tipo"] == "bono" else "de referidos"
+
+
 def _periodo_txt(s):
+    if s["tipo"] == "bono":
+        return f"bono 1·5·10 de la operación {s['periodo']}"
     if s["tipo"] == "anterior":
         return "programa anterior"
     meses = sorted({l["mes"] for l in s["lineas"] if l.get("mes")})
@@ -407,10 +473,13 @@ def _mxn(v):
     return f"${v:,.2f}"
 
 
-def _html(titulo, filas, enlace):
+def _html(titulo, filas, enlace, s=None):
     from html import escape
     li = "".join(f'<li style="white-space:pre-line">{escape(f)}</li>' for f in filas)
-    btn = f'<p><a href="{escape(enlace)}">Ver en la herramienta de referidos</a></p>' if enlace else ""
+    bono = bool(s and s["tipo"] == "bono")
+    if enlace and bono:
+        enlace += "?p=bono"
+    btn = f'<p><a href="{escape(enlace)}">Ver en la herramienta de beneficios</a></p>' if enlace else ""
     return (f'<div style="font-family:Nunito Sans,Arial,sans-serif;color:#212322">'
             f'<h2 style="font-family:Georgia,serif;font-weight:400">{escape(titulo)}</h2><ul>{li}</ul>{btn}'
-            f'<p style="color:#B7B7B7;font-size:12px">Programa de referidos · Pulppo</p></div>')
+            f'<p style="color:#B7B7B7;font-size:12px">{"Bono 1·5·10" if bono else "Programa de referidos"} · Pulppo</p></div>')

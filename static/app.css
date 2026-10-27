@@ -25,7 +25,14 @@ a { color: inherit; }
 /* barra superior */
 .barra { border-bottom: 1pt solid var(--linea); background: var(--surface-default); position: sticky; top: 0; z-index: 10; }
 .barra-in { max-width: 1180px; margin: 0 auto; padding: 0 32px; display: flex; align-items: center; gap: 24px; min-height: 60px; }
-.marca { font: 400 16pt/1 var(--font-display); }
+.marca { font: 400 16pt/1 var(--font-display); background: none; border: 0; padding: 0; color: inherit; cursor: pointer; }
+.programas { display: flex; gap: 4px; }
+.programas button { font: 700 10pt/1 var(--font-body); padding: 10px 14px; border: 1pt solid var(--linea); border-radius: 2px;
+  background: var(--surface-default); color: var(--text-primary); cursor: pointer; white-space: nowrap; }
+.programas button[aria-current="true"] { background: var(--surface-dark); color: var(--text-on-dark); border-color: var(--surface-dark); }
+.barra-in.sub { min-height: 0; }
+.barra-in.sub:has(.tabs[hidden]) { display: none; }
+.barra-in.sub .tabs button { padding: 12px 0 10px; }
 .logo { width: 32px; height: 32px; margin-left: auto; }
 .sesion { margin-left: auto; display: flex; gap: 12px; align-items: center; font-size: 10pt; color: var(--text-muted); }
 .sesion + .logo { margin-left: 12px; }
@@ -80,6 +87,18 @@ input[type="file"] { padding: 6px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .monto-grande { font: 400 28pt/1.1 var(--font-display); margin: 4px 0 8px; }
 
+/* inicio: una tarjeta por programa */
+.tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px; }
+.tarjeta { text-align: left; font: inherit; color: inherit; background: var(--surface-card); border: 1pt solid transparent; border-radius: 2px;
+  padding: 28px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; min-height: 260px; }
+.tarjeta:hover, .tarjeta:focus-visible { border-color: var(--text-primary); outline: none; }
+.tarjeta h2 { font-size: 24pt; }
+.tarjeta p { margin: 0; color: var(--text-muted); max-width: 420px; }
+.tarjeta .ir { margin-top: auto; font-weight: 700; font-size: 10pt; border-top: 1pt solid var(--divider-accent); padding-top: 10px; width: fit-content; }
+.cifras { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 8px 0 0; }
+.cifras dt { font-size: 9pt; color: var(--text-muted); }
+.cifras dd { margin: 0; font: 400 18pt/1.2 var(--font-display); }
+
 /* chips de estado */
 .chip { display: inline-block; font: 700 8pt/1 var(--font-body); text-transform: uppercase; letter-spacing: .06em; padding: 4px 7px;
   border: 1pt solid var(--linea); border-radius: 2px; color: var(--text-muted); white-space: nowrap; }
@@ -101,6 +120,10 @@ tr.click:hover td { background: var(--surface-card); }
 tr.sel td { background: var(--surface-card); }
 td .motivo { display: block; font-size: 9pt; color: var(--text-muted); }
 .pre, td .motivo { white-space: pre-line; }
+
+tr.desglose > td { background: var(--surface-card); padding: 8px 12px 12px 24px; }
+tr.desglose table { font-size: 10pt; }
+tr.desglose th { border-bottom-width: 0.5pt; }
 
 details.mes { border-top: 1pt solid var(--linea); }
 details.mes:last-of-type { border-bottom: 1pt solid var(--linea); }
@@ -145,6 +168,10 @@ th .orden:hover { text-decoration: underline; }
 .reglas li { margin-bottom: 6px; }
 
 @media (max-width: 760px) {
+  .tarjeta { min-height: 0; padding: 20px; }
+  .marca { font-size: 14pt; }
+  .programas { order: 3; width: 100%; }
+  .programas button { flex: 1; }
   .barra-in, .pagina { padding-left: 16px; padding-right: 16px; }
   .barra-in { flex-wrap: wrap; gap: 8px 16px; }
   .tabs { order: 3; width: 100%; gap: 16px; }
@@ -155,3 +182,4 @@ th .orden:hover { text-decoration: underline; }
   .stat .num { font-size: 24pt; }
   .filtros input[type="search"] { margin-left: 0; min-width: 0; width: 100%; }
 }
+.fecha-pago { min-height: 32px; padding: 4px 8px; font-size: 10pt; }

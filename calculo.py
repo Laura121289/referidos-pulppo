@@ -122,6 +122,25 @@ def reparto(op):
     return dict(out)
 
 
+def direccion(prop):
+    """Calle y número, colonia, alcaldía/municipio."""
+    a = (prop or {}).get("address") or {}
+    partes = [a.get("street"), _get(a, ("neighborhood", "name")), _get(a, ("city", "name"))]
+    return ", ".join(p.strip() for p in partes if p and str(p).strip())
+
+
+def desglose(linea):
+    """Operaciones del referido que generaron el beneficio de una línea (referidor, referido, mes).
+    El beneficio de cada operación es proporcional a lo que aportó a la base (respeta el tope)."""
+    base = linea.get("base") or 0
+    out = []
+    for o in linea.get("ops") or []:
+        out.append({"operacion": o.get("codigo") or o.get("op"), "propiedad": o.get("propiedad"), "direccion": o.get("direccion"),
+                    "fecha": o.get("fecha"), "pago": o.get("pago"), "fraccion": o.get("fraccion"), "comision_referido": o.get("monto"),
+                    "beneficio": round(linea["monto"] * (o.get("monto") or 0) / base, 2) if base else 0.0})
+    return out
+
+
 def _get(d, ks):
     for k in ks:
         if not isinstance(d, dict):
@@ -172,7 +191,8 @@ def cargar(db, desde, hasta, excluidas=()):
     q = {"status.last": {"$in": ["closed", "paying"]}, "payments": {"$elemMatch": {"createdAt": {"$gte": ini, "$lt": fin}}}}
     p = {"id": 1, "side": 1, "status.last": 1, "payments.comission": 1, "payments.createdAt": 1, "comission.currency": 1,
          "seller.broker._id": 1, "seller.producer._id": 1, "buyer.broker._id": 1, "property.agent._id": 1,
-         "property.company.email": 1, "property.company.name": 1, "property.internalId": 1}
+         "property.company.email": 1, "property.company.name": 1, "property.internalId": 1,
+         "property.address.street": 1, "property.address.neighborhood.name": 1, "property.address.city.name": 1}
     for op in db.operations.find(q, p).batch_size(5000):
         if _get(op, ("comission", "currency")) == "USD":
             continue  # sin tipo de cambio en Mongo (guía §7)
@@ -189,7 +209,8 @@ def cargar(db, desde, hasta, excluidas=()):
                 c["total"] += val * f
                 c["ops"].append({"op": str(op["_id"]), "codigo": op.get("id"), "estado": _get(op, ("status", "last")),
                                  "pago": round(val, 2), "fraccion": f, "monto": round(val * f, 2),
-                                 "fecha": ts.astimezone(MX).date().isoformat()})
+                                 "fecha": ts.astimezone(MX).date().isoformat(),
+                                 "propiedad": _get(op, ("property", "internalId")), "direccion": direccion(op.get("property"))})
 
     # Regalía mensual de cada inmobiliaria
     etiquetas = {etiqueta_mes(m): m for m in rango_meses(desde, hasta)}

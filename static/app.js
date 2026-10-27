@@ -1,4 +1,4 @@
-// Referidos · Pulppo — vista del asesor y de admins (Finanzas / KAM).
+// Beneficios · Pulppo — inicio con tarjetas; Programa Referidos y Bono 1·5·10, cada uno con su vista de asesor y de admins (Finanzas / KAM).
 const $ = (s, r = document) => r.querySelector(s);
 const CONFIG = window.CONFIG || {};
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -12,10 +12,12 @@ const NIVEL = { estandar: "Estándar", profesional: "Profesional", elite: "Élit
 const ESTADO = {
   disponible: "Por facturar", proxima_ventana: "Próxima ventana", facturado: "Facturado", aprobado: "Aprobado", rechazado: "Rechazado",
   pagado: "Pagado", en_curso: "Mes en curso", pendiente_regalia: "Regalía pendiente", perdido: "No cobrable", vencido: "Vencido", excluido: "No aplica",
+  en_cobranza: "En cobranza",
 };
+const PROGRAMAS = { referidos: "Programa Referidos", bono: "Bono 1·5·10" };
 const chip = (e) => `<span class="chip ${esc(e)}">${esc(ESTADO[e] || e)}</span>`;
 
-let YO = null, TAB = null, SOLS = [], FILTRO = "facturado", SEL = null;
+let YO = null, PROG = null, TAB = null, SOLS = [], FILTRO = "facturado", SEL = null;
 
 async function api(url, opts = {}) {
   const r = await fetch(url, opts);
@@ -28,29 +30,87 @@ const post = (url, body) => api(url, { method: "POST", headers: { "Content-Type"
 
 // ---------------------------------------------------------------- sesión
 
+// Pestañas de cada programa (juntos pero no revueltos: cada uno tiene su bandeja y sus vistas)
+function tabsDe(p) {
+  if (p === "referidos") return [...(YO.agente_id ? [["mio", "Mis beneficios"]] : []),
+    ...(YO.admin ? [["bandeja", "Facturas"], ["beneficios", "Beneficios"], ["referidores", "Referidores"], ["simulacion", "Simulación"], ["excepciones", "Excepciones"]] : [])];
+  if (p === "bono") return [...(YO.bono_broker ? [["bono_mio", "Mis bonos"]] : []), ...(YO.admin ? [["bono_bandeja", "Facturas"], ["bono_ops", "Operaciones"]] : [])];
+  return [];
+}
+
 async function iniciar() {
   try { YO = await api("/api/yo"); } catch { return; }
   $("#login").hidden = true; $("#app").hidden = false;
   $("#quien").textContent = YO.nombre; $("#sesion").hidden = false;
-  const tabs = [];
-  if (YO.agente_id) tabs.push(["mio", "Mis beneficios"]);
-  if (YO.admin) tabs.push(["bandeja", "Facturas"], ["beneficios", "Beneficios"], ["referidores", "Referidores"], ["simulacion", "Simulación"], ["excepciones", "Excepciones"]);
-  if (tabs.length > 1) {
-    $("#tabs").innerHTML = tabs.map(([k, l]) => `<button type="button" data-tab="${k}">${l}</button>`).join("");
-    $("#tabs").hidden = false;
-  }
-  let guardado = null;
-  try { guardado = sessionStorage.getItem("tab"); } catch { /* sin almacenamiento */ }
-  const pedida = new URLSearchParams(location.search).get("tab");  // ligas directas: /?tab=beneficios
-  ir([pedida, guardado].find((t) => tabs.some(([k]) => k === t)) || (YO.admin ? "bandeja" : "mio"));
+  const q = new URLSearchParams(location.search);  // ligas directas: /?p=bono&tab=bono_ops
+  let guardado = {};
+  try { guardado = JSON.parse(sessionStorage.getItem("vista") || "{}"); } catch { /* sin almacenamiento */ }
+  const p = [q.get("p"), guardado.p].find((x) => YO.programas.includes(x));
+  if (p) abrir(p, q.get("tab") || (p === guardado.p ? guardado.tab : null));
+  else inicio();
 }
+
+function marcar(p, tab) {
+  try { sessionStorage.setItem("vista", JSON.stringify({ p, tab })); } catch { /* sin almacenamiento */ }
+  const u = new URL(location.href);
+  u.search = p ? `?p=${p}${tab ? `&tab=${tab}` : ""}` : "";
+  history.replaceState(null, "", u);
+}
+
+function abrir(p, tab) {
+  PROG = p; FILTRO = "facturado"; SEL = null;
+  const tabs = tabsDe(p);
+  pintarProgramas();
+  $("#tabs").innerHTML = tabs.map(([k, l]) => `<button type="button" data-tab="${k}">${l}</button>`).join("");
+  $("#tabs").hidden = tabs.length < 2;
+  ir(tabs.some(([k]) => k === tab) ? tab : (tabs[0] || [])[0]);
+}
+
+// Barra: Inicio + un botón por programa (el activo resaltado); debajo, las pestañas del programa
+function pintarProgramas() {
+  const n = $("#programas");
+  n.innerHTML = YO.programas.map((p) => `<button type="button" data-ir-prog="${p}" aria-current="${PROG === p}">${PROGRAMAS[p]}</button>`).join("");
+  n.hidden = false;
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-ir-prog]"); if (b && b.dataset.irProg !== PROG) abrir(b.dataset.irProg); });
 
 function ir(tab) {
   TAB = tab;
-  try { sessionStorage.setItem("tab", tab); } catch { /* sin almacenamiento */ }
+  marcar(PROG, tab);
   document.querySelectorAll("#tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === tab));
-  ({ mio: () => vistaAsesor(), bandeja: vistaBandeja, beneficios: vistaBeneficios, referidores: vistaReferidores, simulacion: vistaSimulacion, excepciones: vistaExcepciones })[tab]();
+  window.scrollTo(0, 0);
+  ({ mio: () => vistaAsesor(), bandeja: vistaBandeja, beneficios: vistaBeneficios, referidores: vistaReferidores, simulacion: vistaSimulacion, excepciones: vistaExcepciones,
+     bono_mio: () => vistaBono(), bono_bandeja: vistaBandeja, bono_ops: vistaBonoOps })[tab]();
 }
+
+// ---------------------------------------------------------------- inicio: una tarjeta por programa
+
+async function inicio() {
+  PROG = null; TAB = null; marcar(null);
+  pintarProgramas(); $("#tabs").hidden = true;
+  const ps = YO.programas;
+  if (ps.length === 1) return abrir(ps[0]);
+  $("#app").innerHTML = `<p class="muted">Cargando…</p>`;
+  let I = {};
+  try { I = await api("/api/inicio"); } catch (e) { I = { error: e.message }; }
+  const txt = { referidos: "Comisión por la operación de los asesores que invitaste a Pulppo, en 3 niveles.",
+                bono: "5 % de lo que te llevas como bróker comprador en propiedades en exclusiva 1·5·10." };
+  const cifras = (r) => {
+    if (!r) return "";
+    if (r.error) return `<p class="nota error">No se pudo calcular: ${esc(r.error)}</p>`;
+    const xs = [];
+    if (r.totales) xs.push(["Por facturar", mxn0(r.totales.a_cobrar)], ["En proceso", mxn0(r.totales.en_proceso)], ["A futuro", mxn0(r.totales.a_futuro)]);
+    if (r.por_revisar != null) xs.push(["Facturas por revisar", r.por_revisar]);
+    if (r.avisos_nuevos) xs.push(["Avisos nuevos", r.avisos_nuevos]);
+    return `<dl class="cifras">${xs.map(([l, v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join("")}</dl>`;
+  };
+  $("#app").innerHTML = `<header class="encabezado"><p class="eyebrow">Beneficios Pulppo</p><h1>${YO.nombre.includes("@") ? "Hola" : `Hola, ${esc(YO.nombre.split(" ")[0])}`}</h1>
+      <p class="nota">Elige el programa. Cada uno tiene sus montos, sus facturas y su revisión por separado.</p><div class="acento"></div></header>
+    <div class="tarjetas">${ps.map((p) => `<button type="button" class="tarjeta" data-prog="${p}">
+      <span class="eyebrow">${p === "bono" ? "Exclusivas" : "Red de asesores"}</span><h2>${PROGRAMAS[p]}</h2><p>${txt[p]}</p>${cifras(I[p])}
+      <span class="ir">Entrar →</span></button>`).join("")}</div>`;
+}
+document.addEventListener("click", (e) => { const t = e.target.closest("[data-prog]"); if (t) abrir(t.dataset.prog); });
 
 function mostrarLogin() {
   $("#app").hidden = true; $("#login").hidden = false; $("#tabs").hidden = true; $("#sesion").hidden = true;
@@ -81,6 +141,7 @@ $("#form-enlace").addEventListener("submit", async (e) => {
 $("#form-local").addEventListener("submit", (e) => { e.preventDefault(); location.href = `/auth/local?email=${encodeURIComponent($("#correo-local").value)}`; });
 $("#salir").addEventListener("click", async () => { await fetch("/auth/salir", { method: "POST" }); location.href = "/"; });
 $("#tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) ir(b.dataset.tab); });
+$("#marca").addEventListener("click", () => YO && inicio());
 
 // ---------------------------------------------------------------- vista del asesor
 
@@ -125,7 +186,7 @@ async function vistaAsesor(como = null, nombreComo = "") {
   $("#volver-ref")?.addEventListener("click", () => ir("referidores"));
   REFERIDOS = R.referidos;
   $("#mis-referidos").addEventListener("click", (e) => { const b = e.target.closest("[data-nivel]"); if (b) { NIVEL_REF = b.dataset.nivel; pintarReferidos(); } });
-  $("#avisos-ok")?.addEventListener("click", async () => { await post("/api/avisos/leidos"); $(".avisos").remove(); });
+  $("#avisos-ok")?.addEventListener("click", async () => { await post("/api/avisos/leidos?programa=referidos"); $(".avisos").remove(); });
   document.querySelectorAll("form[data-facturar]").forEach((f) => f.addEventListener("submit", subirFactura));
 }
 
@@ -181,7 +242,7 @@ function porFacturarHTML(R, ro) {
       ${ro ? "" : formFactura("mensual", "Subir factura corregida", s.id)}</div>`));
   v.en_revision.forEach((s) => partes.push(`<div class="caja ${s.estado === "aprobado" ? "ok" : "acento-izq"}" style="margin-bottom:8px">${chip(s.estado)}
       <span class="monto-grande" style="display:inline-block;margin-left:12px;font-size:20pt">${mxn(s.monto)}</span>
-      <p>${s.estado === "aprobado" ? `Aprobada. Se paga entre el ${fecha(s.pago_desde)} y el ${fecha(s.pago_hasta)}.` : "Recibimos tu factura. Finanzas y tu KAM la están revisando."}</p></div>`));
+      <p>${s.estado === "aprobado" ? "Aprobada." : "Recibimos tu factura. Finanzas y tu KAM la están revisando."} Fecha de pago aproximada: <b>${fecha(s.pago_estimado)}</b>.</p></div>`));
   if (v.monto) {
     partes.push(`<div class="caja acento-izq">
       <p class="tag">Disponible para facturar${meses ? ` · ${esc(meses)}` : ""}</p><div class="monto-grande">${mxn(v.monto)}</div>
@@ -211,12 +272,14 @@ async function subirFactura(e) {
   catch (x) { err.textContent = x.message; err.hidden = false; b.disabled = false; b.textContent = "Enviar factura"; }
 }
 
+const periodoSol = (s) => (s.tipo === "anterior" ? "Programa anterior" : s.tipo === "bono" ? `Operación ${s.periodo}` : mesTxt(s.periodo));
+
 function tablaSolicitudes(xs) {
   return `<div class="tabla-scroll"><table><thead><tr><th>Enviada en</th><th class="n">Monto</th><th>Estado</th><th>Enviada</th><th>Pago</th><th>Archivos</th></tr></thead><tbody>
-    ${xs.map((s) => `<tr><td>${s.tipo === "anterior" ? "Programa anterior" : esc(mesTxt(s.periodo))}</td><td class="n">${mxn(s.monto)}</td>
+    ${xs.map((s) => `<tr><td>${esc(periodoSol(s))}</td><td class="n">${mxn(s.monto)}</td>
       <td>${chip(s.estado)}${s.estado === "rechazado" ? `<span class="motivo">${esc(s.motivo_rechazo)}</span>` : ""}</td>
       <td>${fecha(s.creada)}</td>
-      <td>${s.pagada ? `Pagada ${fecha(s.pagada)}` : s.pago_hasta ? `A más tardar ${fecha(s.pago_hasta)}` : "—"}</td>
+      <td>${s.pagada ? `Pagada ${fecha(s.pagada)}` : s.estado === "facturado" || s.estado === "aprobado" ? `Aprox. ${fecha(s.pago_estimado)}` : "—"}</td>
       <td><a href="/archivo/${s.id}/pdf" target="_blank" rel="noopener">PDF</a> · <a href="/archivo/${s.id}/xml" target="_blank" rel="noopener">XML</a>${s.tiene_comprobante ? ` · <a href="/archivo/${s.id}/comprobante" target="_blank" rel="noopener">Comprobante</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>`;
 }
@@ -283,34 +346,56 @@ function reglasHTML(r) {
 
 async function vistaBandeja() {
   $("#app").innerHTML = `<p class="muted">Cargando facturas…</p>`;
-  SOLS = await api("/api/admin/solicitudes");
+  SOLS = await api(urlSols());
   pintarBandeja();
 }
+const urlSols = () => `/api/admin/solicitudes${PROG === "bono" ? "?programa=bono" : ""}`;
 
 function pintarBandeja() {
   const n = (e) => SOLS.filter((s) => s.estado === e).length;
-  const vencidas = SOLS.filter((s) => s.estado === "aprobado" && s.dias_para_pagar < 0).length;
+  const vencidas = SOLS.filter((s) => s.estado === "aprobado" && s.dias_para_pagar < 0).length;  // ya pasó la fecha de pago aproximada
   const filtros = [["facturado", "Por revisar"], ["aprobado", "Por pagar"], ["rechazado", "Rechazadas"], ["pagado", "Pagadas"], ["", "Todas"]];
   const q = ($("#buscar")?.value || "").toLowerCase();
   const xs = SOLS.filter((s) => (!FILTRO || s.estado === FILTRO) && (!q || `${s.referidor_nombre} ${s.inmobiliaria} ${s.referidor_email}`.toLowerCase().includes(q)));
   const totalPorPagar = SOLS.filter((s) => s.estado === "aprobado").reduce((a, s) => a + s.monto, 0);
   $("#app").innerHTML = `
-    <header class="encabezado"><p class="eyebrow">${YO.finanzas ? "Finanzas" : "KAM"}</p><h1>Facturas de referidos</h1>
+    <header class="encabezado"><p class="eyebrow">${YO.finanzas ? "Finanzas" : "KAM"}</p><h1>${PROG === "bono" ? "Facturas del bono 1·5·10" : "Facturas de referidos"}</h1>
       <div class="meta"><span>Por revisar: <b>${n("facturado")}</b></span><span>Por pagar: <b>${n("aprobado")} · ${mxn0(totalPorPagar)}</b></span>
-      ${vencidas ? `<span class="rojo">Pago vencido: <b class="rojo">${vencidas}</b></span>` : ""}</div><div class="acento"></div></header>
+      ${vencidas ? `<span class="rojo">Fecha de pago aproximada vencida: <b class="rojo">${vencidas}</b></span>` : ""}</div><div class="acento"></div></header>
     <div class="filtros">${filtros.map(([k, l]) => `<button class="filtro" data-f="${k}" aria-pressed="${FILTRO === k}">${l}${k ? ` (${n(k)})` : ""}</button>`).join("")}
       <input type="search" id="buscar" placeholder="Buscar asesor o inmobiliaria" value="${esc(q)}"></div>
-    <div class="tabla-scroll"><table><thead><tr><th>Asesor</th><th>Inmobiliaria</th><th>Enviada en</th><th class="n">Monto</th><th>Estado</th><th>Actualizada</th><th>Pagar a más tardar</th></tr></thead><tbody>
+    <div class="tabla-scroll"><table><thead><tr><th>Asesor</th><th>Inmobiliaria</th><th>${PROG === "bono" ? "Operación" : "Enviada en"}</th><th class="n">Monto</th><th>Estado</th><th>Actualizada</th><th>Fecha de pago aproximada</th></tr></thead><tbody>
     ${xs.map((s) => `<tr class="click ${SEL === s.id ? "sel" : ""}" data-id="${s.id}"><td>${esc(s.referidor_nombre)}<span class="motivo">${esc(s.referidor_email)}</span></td>
-      <td>${esc(s.inmobiliaria)}</td><td>${s.tipo === "anterior" ? "Programa anterior" : esc(mesTxt(s.periodo))}</td><td class="n">${mxn(s.monto)}</td><td>${chip(s.estado)}</td>
-      <td>${fecha(s.actualizada)}</td><td class="${s.dias_para_pagar < 0 ? "rojo" : ""}">${s.estado === "aprobado" ? `${fecha(s.pago_hasta)} (${s.dias_para_pagar < 0 ? `vencido hace ${-s.dias_para_pagar} d` : `${s.dias_para_pagar} d`})` : "—"}</td></tr>`).join("")
+      <td>${esc(s.inmobiliaria)}</td><td>${esc(s.tipo === "bono" ? s.periodo : periodoSol(s))}</td><td class="n">${mxn(s.monto)}</td><td>${chip(s.estado)}</td>
+      <td>${fecha(s.actualizada)}</td><td class="${s.dias_para_pagar < 0 ? "rojo" : ""}">${celdaFechaPago(s)}${s.dias_para_pagar < 0 ? `<span class="motivo rojo">pasó hace ${-s.dias_para_pagar} d</span>` : ""}</td></tr>`).join("")
       || `<tr><td colspan="7" class="muted">No hay facturas con este filtro.</td></tr>`}
     </tbody></table></div>
     <div id="detalle"></div>`;
   if (SEL) verSolicitud(SEL);
 }
 
+// Fecha de pago aproximada (ambos programas): por omisión 45 días naturales desde que se subió la factura;
+// Finanzas la cambia con el calendario mientras la factura está por revisar o aprobada.
+function celdaFechaPago(s) {
+  if (s.estado === "pagado") return `Pagada ${fecha(s.pagada)}`;
+  if (s.estado !== "facturado" && s.estado !== "aprobado") return "—";
+  if (YO.finanzas) return `<input type="date" class="fecha-pago" data-fecha-pago="${s.id}" value="${esc(s.pago_estimado)}" aria-label="Fecha de pago aproximada">`;
+  return fecha(s.pago_estimado);
+}
+document.addEventListener("change", async (e) => {
+  const i = e.target.closest("[data-fecha-pago]");
+  if (!i) return;
+  i.disabled = true;
+  try {
+    const r = await post(`/api/admin/solicitud/${i.dataset.fechaPago}/fecha-pago`, { fecha: i.value || null });
+    const s = SOLS.find((x) => x.id === r.id); if (s) Object.assign(s, r);
+    if (SEL === r.id) verSolicitud(SEL);
+  } catch (x) { alert(x.message); }
+  i.disabled = false;
+});
+
 document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-fecha-pago]")) return;  // el calendario no abre el detalle
   const f = e.target.closest("[data-f]");
   if (f) { FILTRO = f.dataset.f; SEL = null; pintarBandeja(); return; }
   const tr = e.target.closest("tr.click[data-id]");
@@ -330,12 +415,17 @@ async function verSolicitud(id) {
   if (s.estado === "aprobado" && YO.finanzas) acciones.push(`<button class="btn" data-acc="pagar">Marcar como pagado</button>`, `<button class="btn btn-sec" data-acc="revertir">Regresar a revisión</button>`);
   const c = s.cfdi || {};
   box.innerHTML = `<div class="detalle">
-    <header class="bloque-h"><p class="eyebrow">${s.tipo === "anterior" ? "Programa anterior" : `Enviada en ${esc(mesTxt(s.periodo))}`}</p>
+    <header class="bloque-h"><p class="eyebrow">${s.tipo === "anterior" ? "Programa anterior" : s.tipo === "bono" ? `Bono 1·5·10 · operación ${esc(s.periodo)}` : `Enviada en ${esc(mesTxt(s.periodo))}`}</p>
       <h2>${esc(s.referidor_nombre)} · ${mxn(s.monto)}</h2>
       <div class="meta"><span>${esc(s.inmobiliaria)}</span><span>${esc(s.referidor_email)}</span><span>${chip(s.estado)}</span>
       <span><a href="/archivo/${s.id}/pdf" target="_blank" rel="noopener">Ver PDF</a> · <a href="/archivo/${s.id}/xml" target="_blank" rel="noopener">Ver XML</a>${s.tiene_comprobante ? ` · <a href="/archivo/${s.id}/comprobante" target="_blank" rel="noopener">Comprobante</a>` : ""}</span></div></header>
-    ${s.estado === "rechazado" ? `<div class="caja alerta pre" style="margin-top:16px"><b>Motivo del rechazo:</b> ${esc(s.motivo_rechazo)}<br>Plazo para corregir: ${fecha(s.limite_correccion)}</div>` : ""}
-    ${s.estado === "aprobado" ? `<div class="caja ${s.dias_para_pagar < 0 ? "alerta" : "acento-izq"}" style="margin-top:16px">Aprobada el ${fecha(s.aprobada)}. Pagar entre el <b>${fecha(s.pago_desde)}</b> y el <b>${fecha(s.pago_hasta)}</b>.</div>` : ""}
+    ${s.estado === "rechazado" ? `<div class="caja alerta pre" style="margin-top:16px"><b>Motivo del rechazo:</b> ${esc(s.motivo_rechazo)}${s.limite_correccion ? `<br>Plazo para corregir: ${fecha(s.limite_correccion)}` : ""}</div>` : ""}
+    ${s.estado === "facturado" || s.estado === "aprobado" ? `<div class="caja ${s.dias_para_pagar < 0 ? "alerta" : "acento-izq"} fila-form" style="margin-top:16px">
+      ${s.estado === "aprobado" ? `<span>Aprobada el ${fecha(s.aprobada)}.</span>` : ""}
+      <label class="campo"><span class="tag">Fecha de pago aproximada</span>${YO.finanzas
+        ? `<input type="date" data-fecha-pago="${s.id}" value="${esc(s.pago_estimado)}">`
+        : `<span>${fecha(s.pago_estimado)}</span>`}</label>
+      <span class="nota">${s.pago_estimado_fijada ? "Fijada por Finanzas." : `Por omisión: 45 días naturales desde que se subió la factura.`} El bróker la ve en su pantalla.</span></div>` : ""}
     ${s.estado === "pagado" ? `<div class="caja ok" style="margin-top:16px">Pagada el ${fecha(s.pagada)}${s.pago_referencia ? ` · ${esc(s.pago_referencia)}` : ""}.</div>` : ""}
     <div class="acciones">${acciones.join("")}</div>
     <div class="grid2">
@@ -346,12 +436,44 @@ async function verSolicitud(id) {
       <div class="caja"><h3>Historial</h3><ul class="historial">${s.eventos.map((e) => `<li>${fecha(e.fecha)} · ${esc(e.actor_email)} (${esc(e.actor_rol)}): ${esc(e.de ? `${ESTADO[e.de] || e.de} → ` : "")}${esc(ESTADO[e.a] || e.a)}${e.nota ? ` — ${esc(e.nota)}` : ""}</li>`).join("")}</ul></div>
     </div>
     <h3 style="margin:24px 0 8px">Qué incluye</h3>
-    <div class="tabla-scroll"><table><thead><tr><th>Mes</th><th>Referido</th><th class="n">Nivel</th><th class="n">Base</th><th class="n">Beneficio</th></tr></thead><tbody>
+    ${s.tipo === "bono" ? detalleBonoSol(s) : s.tipo === "mensual" ? detalleReferidosSol(s) : `<div class="tabla-scroll"><table><thead><tr><th>Mes</th><th>Referido</th><th class="n">Nivel</th><th class="n">Base</th><th class="n">Beneficio</th></tr></thead><tbody>
       ${s.detalle.map((l) => `<tr><td>${esc(l.mes ? (l.mes.length === 7 ? mesTxt(l.mes) : l.mes) : "")}</td><td>${esc(l.referido || "")}${l.operacion ? `<span class="motivo">${esc(l.operacion)}</span>` : ""}</td><td class="n">${esc(l.nivel ?? "")}</td><td class="n">${l.base_elegible != null ? mxn(l.base_elegible) : "—"}</td><td class="n">${mxn(l.monto)}</td></tr>`).join("")}
-      <tr class="total"><td colspan="4">Total</td><td class="n">${mxn(s.monto)}</td></tr></tbody></table></div>
+      <tr class="total"><td colspan="4">Total</td><td class="n">${mxn(s.monto)}</td></tr></tbody></table></div>`}
     </div>`;
   box.querySelectorAll("[data-acc]").forEach((b) => b.addEventListener("click", () => accion(s, b.dataset.acc)));
+  box.querySelectorAll("[data-desglose]").forEach((b) => b.addEventListener("click", () => {
+    const fila = box.querySelector(`#desg-${b.dataset.desglose}`), abierto = fila.hidden;
+    fila.hidden = !abierto; b.textContent = abierto ? "Ocultar desglose" : "Ver desglose"; b.setAttribute("aria-expanded", abierto);
+  }));
+  box.querySelector("#ver-todo")?.addEventListener("click", (e) => {
+    const abrirTodo = e.target.dataset.abierto !== "1";
+    box.querySelectorAll("[data-desglose]").forEach((b) => { if (box.querySelector(`#desg-${b.dataset.desglose}`).hidden === abrirTodo) b.click(); });
+    e.target.dataset.abierto = abrirTodo ? "1" : ""; e.target.textContent = abrirTodo ? "Ocultar todos los desgloses" : "Ver todos los desgloses";
+  });
+  box.querySelector("#enviar-desglose")?.addEventListener("click", () => dialogo(
+    `<h3>Enviar desglose por correo</h3><p>Para <b>${esc(s.referidor_email)}</b>: tabla con el ID de cada operación, la dirección de la propiedad y el beneficio que generó, más el archivo para Excel.</p>
+     <label class="campo"><span class="tag">Mensaje (opcional)</span><textarea name="nota" rows="3" placeholder="Ej.: Te comparto el detalle de tu factura de septiembre."></textarea></label>`,
+    async (f) => { await post(`/api/admin/solicitud/${s.id}/enviar-desglose`, { nota: f.nota.value }); verSolicitud(s.id); }));
   box.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Referidos: cada línea (referido y mes) se abre para ver las operaciones que generaron el beneficio
+function detalleReferidosSol(s) {
+  const ops = s.detalle.reduce((a, l) => a + (l.desglose || []).length, 0);
+  return `<div class="filtros"><button class="btn btn-sec btn-chico" id="ver-todo">Ver todos los desgloses</button>
+      <a class="btn btn-sec btn-chico" href="/api/admin/solicitud/${s.id}/desglose.csv">Descargar desglose (Excel)</a>
+      <button class="btn btn-chico" id="enviar-desglose">Enviar desglose al bróker</button>
+      <span class="nota">${ops} ${ops === 1 ? "operación" : "operaciones"}</span></div>
+    <div class="tabla-scroll"><table><thead><tr><th>Mes</th><th>Referido</th><th class="n">Nivel</th><th class="n">Comisión del referido</th><th class="n">Beneficio</th><th></th></tr></thead><tbody>
+    ${s.detalle.map((l, i) => `<tr><td>${esc(mesTxt(l.mes))}</td><td>${esc(l.referido || "")}<span class="motivo">${esc(l.referido_inmobiliaria || "")}</span></td>
+      <td class="n">${esc(l.nivel ?? "")}${l.porcentaje ? `<span class="motivo">${pct(l.porcentaje)}</span>` : ""}</td>
+      <td class="n">${mxn(l.base_elegible)}${l.base && l.base_elegible < l.base ? `<span class="motivo">de ${mxn(l.base)} (tope)</span>` : ""}</td><td class="n">${mxn(l.monto)}</td>
+      <td>${(l.desglose || []).length ? `<button class="link" data-desglose="${i}" aria-expanded="false">Ver desglose</button>` : `<span class="muted">Sin operaciones</span>`}</td></tr>
+      <tr id="desg-${i}" class="desglose" hidden><td colspan="6"><table><thead><tr><th>ID de la operación</th><th>Propiedad</th><th>Fecha de cobro</th><th class="n">Comisión cobrada</th><th class="n">Parte del referido</th><th class="n">Beneficio</th></tr></thead><tbody>
+        ${(l.desglose || []).map((o) => `<tr><td>${esc(o.operacion)}</td><td>${esc(o.direccion || "—")}${o.propiedad ? `<span class="motivo">${esc(o.propiedad)}</span>` : ""}</td><td>${fecha(o.fecha)}</td>
+          <td class="n">${mxn(o.pago)}</td><td class="n">${mxn(o.comision_referido)}<span class="motivo">${pct(o.fraccion)}</span></td><td class="n">${mxn(o.beneficio)}</td></tr>`).join("")}
+      </tbody></table></td></tr>`).join("")}
+    <tr class="total"><td colspan="4">Total</td><td class="n">${mxn(s.monto)}</td><td></td></tr></tbody></table></div>`;
 }
 
 function dialogo(html, alEnviar) {
@@ -372,9 +494,9 @@ function dialogo(html, alEnviar) {
 }
 
 async function accion(s, acc) {
-  const recargar = async () => { SOLS = await api("/api/admin/solicitudes"); pintarBandeja(); };
+  const recargar = async () => { SOLS = await api(urlSols()); pintarBandeja(); };
   if (acc === "aprobar") {
-    dialogo(`<h3>Aprobar factura</h3><p>${esc(s.referidor_nombre)} · ${mxn(s.monto)}</p><p class="nota">Se le avisa al asesor y empieza a correr el plazo de pago de 30 a 45 días.</p>`,
+    dialogo(`<h3>Aprobar factura</h3><p>${esc(s.referidor_nombre)} · ${mxn(s.monto)}</p><p class="nota">Se le avisa al ${s.tipo === "bono" ? "bróker" : "asesor"} con la fecha de pago aproximada (${fecha(s.pago_estimado)}). Puedes cambiarla con el calendario.</p>`,
       async () => { await post(`/api/admin/solicitud/${s.id}/aprobar`); await recargar(); });
   } else if (acc === "rechazar") {
     const detectado = (s.revision || []).filter((x) => !x.ok && x.motivo).map((x) => `• ${x.motivo}`);
@@ -524,6 +646,137 @@ async function vistaExcepciones() {
   document.querySelectorAll("[data-quitar]").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm(`¿Quitar la excepción de ${b.dataset.quitar}?`)) return;
     await api(`/api/admin/excepciones/${encodeURIComponent(b.dataset.quitar)}`, { method: "DELETE" }); vistaExcepciones();
+  }));
+}
+
+// ---------------------------------------------------------------- Bono 1·5·10: vista del bróker
+
+const LADO = { both: "Ambos lados", buyer: "Lado comprador", seller: "Lado vendedor" };
+const opTxt = (o) => `${esc(o.operacion)}<span class="motivo">${esc(o.propiedad || "")}${o.colonia ? ` · ${esc(o.colonia)}` : ""}</span>`;
+const estadoBono = (o) => `${chip(o.estado)}${o.motivo ? `<span class="motivo">${esc(o.motivo)}</span>` : ""}`;
+
+function formBono(op, boton, corregir = "") {
+  return `<form data-bono="${esc(op)}" data-corregir="${esc(corregir)}" class="fila-form" style="margin-top:16px">
+      <label class="campo"><span class="tag">Factura PDF</span><input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
+      <label class="campo"><span class="tag">Factura XML</span><input type="file" name="xml" accept=".xml,text/xml,application/xml" required></label>
+      <button class="btn" type="submit">${boton}</button>
+      <p class="nota error" data-error hidden></p>
+    </form>`;
+}
+
+async function vistaBono(como = null) {
+  $("#app").innerHTML = `<p class="muted">Calculando tus bonos…</p>`;
+  let R;
+  try { R = await api(`/api/bono/resumen${como ? `?como=${encodeURIComponent(como)}` : ""}`); }
+  catch (e) { $("#app").innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
+  const a = R.agente, t = R.totales, ro = R.solo_lectura, r = R.reglas;
+  const disp = R.operaciones.filter((o) => o.estado === "disponible");
+  const rech = R.solicitudes.filter((s) => s.estado === "rechazado");
+  const enRev = R.solicitudes.filter((s) => s.estado === "facturado" || s.estado === "aprobado");
+  $("#app").innerHTML = `
+    ${ro ? `<div class="banner-como"><span>Viendo como <b>${esc(a.nombre)}</b> (solo lectura)</span><button class="link" id="volver-ops">Volver a operaciones</button></div>` : ""}
+    <header class="encabezado"><p class="eyebrow">Bono 1·5·10</p><h1>${esc(a.nombre)}</h1>
+      <div class="meta"><span>${esc(a.inmobiliaria || "")}${a.tipo === "master" ? " · Master Broker" : ""}</span>
+      <span>Operaciones con bono: <b>${R.operaciones.length}</b></span></div><div class="acento"></div></header>
+    ${avisosHTML(R.avisos)}
+    <section class="bloque"><div class="stats">
+      ${stat(t.a_cobrar, "Por facturar", "Listo para facturar")}
+      ${stat(t.en_proceso, "En proceso", "Facturado o aprobado")}
+      ${stat(t.cobrado, "Cobrado", "Pagado por Pulppo")}
+      ${stat(t.a_futuro, "A futuro", "Cerrada este mes o en cobranza")}
+    </div><p class="nota">Cuentan las operaciones cerradas desde el ${fecha(r.desde)}.</p></section>
+    <section class="bloque"><header><h2>Por facturar</h2><span class="nota">Una factura por operación, desde el mes siguiente al cierre. El bono no vence.</span></header>
+      ${rech.map((s) => `<div class="caja alerta" style="margin-bottom:8px"><h3>Tu factura de la operación ${esc(s.periodo)} por ${mxn(s.monto)} fue rechazada</h3>
+        <p class="pre"><b>Motivo:</b> ${esc(s.motivo_rechazo)}</p><p>Corrígela y vuelve a subirla.</p>${ro ? "" : formBono("", "Subir factura corregida", s.id)}</div>`).join("")}
+      ${enRev.map((s) => `<div class="caja ${s.estado === "aprobado" ? "ok" : "acento-izq"}" style="margin-bottom:8px">${chip(s.estado)}
+        <span class="monto-grande" style="display:inline-block;margin-left:12px;font-size:20pt">${mxn(s.monto)}</span> <span class="muted">Operación ${esc(s.periodo)}</span>
+        <p>${s.estado === "aprobado" ? "Aprobada." : "Recibimos tu factura. Finanzas la está revisando."}
+        Fecha de pago aproximada: <b>${fecha(s.pago_estimado)}</b>.</p></div>`).join("")}
+      ${disp.map((o) => `<div class="caja acento-izq" style="margin-bottom:8px">
+        <p class="tag">Operación ${esc(o.operacion)} · ${esc(o.propiedad || "")} · cerrada el ${fecha(o.cierre)}</p><div class="monto-grande">${mxn(o.monto)}</div>
+        <p>Emite tu factura a Pulppo por <b>${mxn(o.monto)} más IVA</b> con el concepto <b>“${esc(o.concepto)}”</b> y súbela en PDF y XML.</p>
+        ${ro ? "" : formBono(o.id, "Enviar factura")}</div>`).join("")}
+      ${!disp.length && !rech.length && !enRev.length ? `<div class="caja"><p>No tienes bonos disponibles para facturar por ahora.</p></div>` : ""}
+    </section>
+    ${R.solicitudes.length ? `<section class="bloque"><header><h2>Mis facturas</h2></header>${tablaSolicitudes(R.solicitudes)}</section>` : ""}
+    <section class="bloque"><header><h2>Mis operaciones</h2><span class="nota">Operaciones 1·5·10 en las que fuiste el bróker comprador.</span></header>
+      ${R.operaciones.length ? `<div class="tabla-scroll"><table><thead><tr><th>Operación</th><th>Cierre</th><th>Lado</th><th class="n">Comisión</th><th class="n">Tu parte</th><th class="n">Bono ${pct(r.porcentaje)}</th><th>Estado</th></tr></thead><tbody>
+      ${R.operaciones.map((o) => `<tr><td>${opTxt(o)}</td><td>${fecha(o.cierre)}</td><td>${LADO[o.lado] || esc(o.lado)}</td><td class="n">${mxn(o.comision)}</td>
+        <td class="n">${mxn(o.base)}<span class="motivo">${pct(o.fraccion)}</span></td><td class="n">${mxn(o.monto)}</td><td>${estadoBono(o)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">Aún no tienes operaciones 1·5·10 como bróker comprador desde el ${fecha(r.desde)}.</p>`}
+      ${R.no_aplica.length ? `<details class="mes" style="margin-top:16px"><summary><span class="t">Operaciones que no generan bono</span><span class="muted">${R.no_aplica.length}</span></summary>
+        <div class="tabla-scroll"><table><thead><tr><th>Operación</th><th>Cierre</th><th>Motivo</th></tr></thead><tbody>
+        ${R.no_aplica.map((o) => `<tr><td>${esc(o.operacion)}<span class="motivo">${esc(o.propiedad || "")}</span></td><td>${fecha(o.cierre)}</td><td>${esc(o.motivo)}</td></tr>`).join("")}
+        </tbody></table></div></details>` : ""}
+    </section>
+    <section class="bloque"><header><h2>Cómo se calcula</h2></header><ul class="reglas">
+      <li>Aplica a propiedades en exclusiva <b>1·5·10</b>: comisión de ${r.comision_min} % más IVA y exclusiva de al menos ${r.meses_exclusiva} meses.</li>
+      <li>Cobras <b>${pct(r.porcentaje)}</b> de lo que te llevas como bróker comprador: el 50 % de la comisión si la operación es de ambos lados, o el 100 % si es solo lado comprador.</li>
+      <li>Si eres el lado vendedor o el productor, no aplica.</li>
+      <li>El bono se genera cuando la operación está concretada y se cobra a partir del mes siguiente al cierre (cierre en abril, se cobra desde mayo).</li>
+      <li>Factura una operación a la vez, con el concepto “Bono 1.5.10” y el ID de la operación. Una vez aprobada, se paga en ${r.pago_min} a ${r.pago_max} días.</li></ul></section>`;
+  $("#volver-ops")?.addEventListener("click", () => ir("bono_ops"));
+  $("#avisos-ok")?.addEventListener("click", async () => { await post("/api/avisos/leidos?programa=bono"); $(".avisos").remove(); });
+  document.querySelectorAll("form[data-bono]").forEach((f) => f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const b = f.querySelector("button"), err = f.querySelector("[data-error]"), txt = b.textContent;
+    const fd = new FormData(f); fd.append("operacion", f.dataset.bono);
+    if (f.dataset.corregir) fd.append("corregir", f.dataset.corregir);
+    b.disabled = true; b.textContent = "Enviando…"; err.hidden = true;
+    try { await api("/api/bono/facturar", { method: "POST", body: fd }); vistaBono(); }
+    catch (x) { err.textContent = x.message; err.hidden = false; b.disabled = false; b.textContent = txt; }
+  }));
+}
+
+function detalleBonoSol(s) {
+  return `<div class="tabla-scroll"><table><thead><tr><th>Operación</th><th>Cierre</th><th class="n">Comisión</th><th class="n">Parte del comprador</th><th class="n">Bono</th></tr></thead><tbody>
+    ${s.detalle.map((l) => `<tr><td>${esc(l.operacion)}<span class="motivo">${esc(l.propiedad || "")}</span></td><td>${fecha(l.cierre)}</td><td class="n">${mxn(l.comision)}</td>
+      <td class="n">${mxn(l.base)}<span class="motivo">${pct(l.fraccion)}</span></td><td class="n">${mxn(l.monto)}</td></tr>`).join("")}
+    <tr class="total"><td colspan="4">Total</td><td class="n">${mxn(s.monto)}</td></tr></tbody></table></div>`;
+}
+
+// ---------------------------------------------------------------- Bono 1·5·10: operaciones (admins)
+
+let BOPS = null, BOPS_F = { grupo: "", q: "" };
+const GRUPOS_BONO = { a_cobrar: "Por facturar", en_proceso: "En proceso", cobrado: "Cobrado", a_futuro: "A futuro", no_aplica: "No aplica" };
+
+async function vistaBonoOps() {
+  $("#app").innerHTML = `<p class="muted">Buscando operaciones 1·5·10…</p>`;
+  BOPS = await api("/api/admin/bono/operaciones");
+  $("#app").innerHTML = `<header class="encabezado"><p class="eyebrow">Solo admins</p><h1>Operaciones 1·5·10</h1>
+      <p class="nota">Operaciones concretadas desde el ${fecha(BOPS.desde)} en propiedades 1·5·10 con bróker comprador de Pulppo, con su bono y estado. Las que no generan bono muestran el motivo.</p>
+      <div class="meta"><button class="link" id="actualizar-bono">Actualizar datos de Mongo</button></div><div class="acento"></div></header>
+    <div id="bono-stats"></div>
+    <div class="filtros">${[["", "Todas"], ...Object.entries(GRUPOS_BONO)].map(([k, l]) => `<button class="filtro" data-gb="${k}" aria-pressed="${BOPS_F.grupo === k}">${l}</button>`).join("")}
+      <input type="search" id="bono-q" placeholder="Buscar bróker, inmobiliaria u operación" value="${esc(BOPS_F.q)}"></div>
+    <div id="bono-tabla"></div>`;
+  $("#actualizar-bono").addEventListener("click", async (e) => { e.target.textContent = "Actualizando…"; await post("/api/admin/actualizar"); vistaBonoOps(); });
+  $("#app").querySelectorAll("[data-gb]").forEach((b) => b.addEventListener("click", () => {
+    BOPS_F.grupo = b.dataset.gb; document.querySelectorAll("[data-gb]").forEach((x) => x.setAttribute("aria-pressed", x.dataset.gb === BOPS_F.grupo)); pintarBonoOps();
+  }));
+  $("#bono-q").addEventListener("input", (e) => { BOPS_F.q = e.target.value; pintarBonoOps(); });
+  pintarBonoOps();
+}
+
+function pintarBonoOps() {
+  const todas = BOPS.operaciones, q = BOPS_F.q.toLowerCase();
+  const suma = (g) => todas.filter((o) => o.grupo === g).reduce((a, o) => a + o.monto, 0);
+  $("#bono-stats").innerHTML = `<section class="bloque"><div class="stats">${stat(suma("a_cobrar"), "Por facturar", "Disponible para los brókers")}
+    ${stat(suma("en_proceso"), "En proceso", "Facturado o aprobado")}${stat(suma("cobrado"), "Cobrado", "Pagado")}${stat(suma("a_futuro"), "A futuro", "Cerradas este mes o en cobranza")}</div></section>`;
+  const xs = todas.filter((o) => (!BOPS_F.grupo || o.grupo === BOPS_F.grupo)
+    && (!q || `${o.broker} ${o.broker_email} ${o.inmobiliaria} ${o.operacion} ${o.propiedad}`.toLowerCase().includes(q)));
+  $("#bono-tabla").innerHTML = xs.length ? `<div class="tabla-scroll"><table><thead><tr><th>Operación</th><th>Cierre</th><th>Bróker comprador</th><th>Lado</th><th class="n">Comisión</th><th class="n">Parte del comprador</th><th class="n">Bono</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${xs.map((o) => `<tr><td>${opTxt(o)}</td><td>${fecha(o.cierre)}</td>
+      <td>${esc(o.broker || "—")}<span class="motivo">${esc(o.broker_email || "")}${o.inmobiliaria ? ` · ${esc(o.inmobiliaria)}` : ""}${o.broker_tipo === "master" ? " · Master Broker" : ""}</span></td>
+      <td>${LADO[o.lado] || esc(o.lado)}</td><td class="n">${mxn(o.comision)}</td><td class="n">${mxn(o.base)}<span class="motivo">${pct(o.fraccion)}</span></td>
+      <td class="n">${o.estado === "excluido" ? `<span class="muted">${mxn(o.monto)}</span>` : mxn(o.monto)}</td>
+      <td>${estadoBono(o)}${(o.avisos || []).map((a) => `<span class="motivo rojo">${esc(a)}</span>`).join("")}</td>
+      <td>${o.broker_id ? `<button class="btn btn-sec btn-chico" data-como-bono="${o.broker_id}">Ver como bróker</button>` : ""}</td></tr>`).join("")}
+    <tr class="total"><td colspan="6">Total (${xs.length})</td><td class="n">${mxn(xs.filter((o) => o.estado !== "excluido").reduce((a, o) => a + o.monto, 0))}</td><td colspan="2"></td></tr>
+    </tbody></table></div>` : `<p class="muted">No hay operaciones con este filtro.</p>`;
+  document.querySelectorAll("[data-como-bono]").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#tabs button").forEach((x) => x.setAttribute("aria-selected", "false"));
+    vistaBono(b.dataset.comoBono); window.scrollTo(0, 0);
   }));
 }
 

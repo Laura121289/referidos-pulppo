@@ -11,6 +11,11 @@
   "pago_dias_min": 30,
   "pago_dias_max": 45,
   "programa_anterior_limite": "2026-12-20",
+  "bono_desde": "2026-10-01",
+  "bono_porcentaje": 0.05,
+  "bono_comision_min": 5,
+  "bono_meses_exclusiva": 6,
+  "bono_dominio": "pulppo.com",
   "inmobiliarias_excluidas": ["Circulo Bienes Raices", "Ancona Plus", "Inmobiliaria Demo"],
   "finanzas": ["laura@pulppo.com", "mitchellmonserrat@tuhabi.mx"],
   "excepciones_iniciales": [

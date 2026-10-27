@@ -1,7 +1,9 @@
-"""Herramienta de beneficios de referidos (programa relanzado) · Pulppo.
+"""Herramienta de beneficios de Pulppo: Programa Referidos y Bono 1·5·10 (inicio con una tarjeta por programa).
 
-Asesor: ve sus beneficios (a cobrar, en proceso, cobrados, a futuro), sube su factura del 1 al 10 y ve el estado.
-Finanzas y KAMs (admins): bandeja de facturas → aprobar / rechazar con motivo; Finanzas marca como pagado.
+Referidos. Asesor: ve sus beneficios (a cobrar, en proceso, cobrados, a futuro), sube su factura del 1 al 10 y ve el estado.
+Bono 1·5·10 (bono.py). Cualquier bróker con correo @pulppo.com: ve el bono de las operaciones donde fue comprador y sube
+una factura por operación. Los mismos admins de referidos.
+Finanzas y KAMs (admins): bandeja de facturas de cada programa → aprobar / rechazar con motivo; Finanzas marca como pagado.
 
 Local:   ../../.venv/bin/python app.py  →  http://127.0.0.1:8060  (entrar con /auth/local?email=...; HOY=AAAA-MM-DD simula la fecha)
 Vercel:  preparar_deploy.py arma deploy/ (ver CLAUDE.md del subproyecto).
@@ -24,6 +26,7 @@ for p in (HERE, HERE.parents[1] / "base-de-datos" / "lib"):
         sys.path.insert(0, str(p))
 
 import almacen  # noqa: E402
+import bono  # noqa: E402
 import calculo  # noqa: E402
 from almacen import ErrorFlujo  # noqa: E402
 
@@ -32,6 +35,8 @@ DS = HERE / "ds" if (HERE / "ds").exists() else HERE.parents[1] / "design-system
 CFG = json.loads((HERE / "config.json").read_text())
 if not EN_VERCEL and os.environ.get("INICIO_PROGRAMA"):
     CFG["inicio_programa"] = os.environ["INICIO_PROGRAMA"]  # solo local, para probar con meses ya cerrados
+if not EN_VERCEL and os.environ.get("BONO_DESDE"):
+    CFG["bono_desde"] = os.environ["BONO_DESDE"]  # solo local, para probar el bono con cierres anteriores
 CACHE_TTL = 600
 
 
@@ -126,6 +131,11 @@ def anterior():
     return _cacheado("anterior", lambda: calculo.programa_anterior(db(), CFG["inmobiliarias_excluidas"]))
 
 
+def lineas_bono():
+    ops = _cacheado("bono", lambda: bono.cargar(db(), CFG, CFG["inmobiliarias_excluidas"]))
+    return bono.calcular(ops, hoy(), almacen.solicitudes(tipo="bono"))
+
+
 def cxp():
     f = HERE / "historico_cxp.json"
     return json.loads(f.read_text()) if f.exists() else []
@@ -191,6 +201,20 @@ def ve_inmo(u, nombre):
 
 def usuario():
     return session.get("usuario")
+
+
+def es_broker_bono(email):
+    return email.lower().endswith("@" + CFG["bono_dominio"])
+
+
+def programas(u):
+    """Programas que ve el usuario: referidos (asesores en Mongo y admins) y bono (correo @pulppo.com y admins)."""
+    out = []
+    if u.get("agente_id") or u["roles"]:
+        out.append("referidos")
+    if (u.get("agente_id") and es_broker_bono(u["email"])) or u["roles"]:
+        out.append("bono")
+    return out
 
 
 def requiere(*roles):
@@ -265,8 +289,9 @@ def auth_local():
         abort(404)
     if not _entrar(request.args.get("email", "")):
         return "Ese correo no es asesor ni admin", 404
-    tab = request.args.get("tab", "")
-    return redirect(f"/?tab={tab}" if tab.isalpha() else "/")
+    tab, p = request.args.get("tab", ""), request.args.get("p", "")
+    qs = "&".join(f"{k}={v}" for k, v in (("p", p), ("tab", tab)) if v.isalpha())
+    return redirect(f"/?{qs}" if qs else "/")
 
 
 @app.post("/auth/salir")
@@ -322,7 +347,40 @@ def error_flujo(e):
 @requiere()
 def api_yo():
     u = usuario()
-    return jsonify({**u, "admin": bool(u["roles"]), "finanzas": "finanzas" in u["roles"], "hoy": hoy().isoformat()})
+    return jsonify({**u, "admin": bool(u["roles"]), "finanzas": "finanzas" in u["roles"], "hoy": hoy().isoformat(),
+                    "programas": programas(u), "bono_broker": bool(u.get("agente_id") and es_broker_bono(u["email"]))})
+
+
+@app.get("/api/inicio")
+@requiere()
+def api_inicio():
+    """Resumen para las tarjetas del inicio (cada una se calcula aparte: si una falla, la otra se muestra)."""
+    u, out = usuario(), {}
+    ps = programas(u)
+    if "referidos" in ps:
+        try:
+            if u["roles"]:
+                xs = [s for s in almacen.solicitudes() if s["tipo"] != "bono" and _puede_ver(u, s)]
+                out["referidos"] = {"por_revisar": sum(calculo.estado_solicitud(s, hoy(), CFG) == "facturado" for s in xs)}
+            if u.get("agente_id"):
+                ag = agente_por_id(u["agente_id"])
+                mias = [l for l in lineas_programa() if l["referidor_id"] == ag["id"]]
+                out.setdefault("referidos", {})["totales"] = calculo.resumen(mias)
+        except Exception as e:  # noqa: BLE001
+            out["referidos"] = {"error": str(e)[:200]}
+    if "bono" in ps:
+        try:
+            L = lineas_bono()
+            if u["roles"]:
+                xs = [s for s in almacen.solicitudes(tipo="bono") if _puede_ver(u, s)]
+                out["bono"] = {"por_revisar": sum(s["estado"] == "facturado" for s in xs)}
+            if u.get("agente_id") and es_broker_bono(u["email"]):
+                out.setdefault("bono", {})["totales"] = bono.resumen([l for l in L if l["broker_id"] == u["agente_id"]])
+        except Exception as e:  # noqa: BLE001
+            out["bono"] = {"error": str(e)[:200]}
+    for p in ps:  # solo el número de avisos nuevos: cada programa los muestra en su propia pantalla
+        out.setdefault(p, {})["avisos_nuevos"] = sum(not a["leido"] for a in almacen.avisos(u["email"], p))
+    return jsonify(out)
 
 
 def _lineas_publicas(xs):
@@ -334,7 +392,7 @@ def _lineas_publicas(xs):
 def _sol_publica(s):
     return {k: s.get(k) for k in ("id", "tipo", "periodo", "monto", "estado", "motivo_rechazo", "limite_correccion",
                                    "creada", "actualizada", "aprobada", "pago_desde", "pago_hasta", "pagada",
-                                   "pago_referencia")} | {"cfdi": {k: s["cfdi"].get(k) for k in ("UUID", "Total", "SubTotal", "Folio", "Serie")},
+                                   "pago_referencia")} | {"pago_estimado": almacen.pago_estimado(s, CFG), "pago_estimado_fijada": bool(s.get("pago_estimado")), "cfdi": {k: s["cfdi"].get(k) for k in ("UUID", "Total", "SubTotal", "Folio", "Serie")},
                                                           "lineas": len(s["lineas"]), "tiene_comprobante": bool(s.get("comprobante"))}
 
 
@@ -427,14 +485,14 @@ def api_resumen():
     ag = _referidor_objetivo()
     r = resumen_referidor(ag)
     r["solo_lectura"] = bool(request.args.get("como"))
-    r["avisos"] = almacen.avisos(ag["email"]) if not r["solo_lectura"] else []
+    r["avisos"] = almacen.avisos(ag["email"], "referidos") if not r["solo_lectura"] else []
     return jsonify(r)
 
 
 @app.post("/api/avisos/leidos")
 @requiere()
 def api_avisos_leidos():
-    almacen.marcar_leidos(usuario()["email"])
+    almacen.marcar_leidos(usuario()["email"], "bono" if request.args.get("programa") == "bono" else "referidos")
     return jsonify(ok=True)
 
 
@@ -454,9 +512,10 @@ def api_facturar():
     pdf, xml = _archivo_subido("pdf"), _archivo_subido("xml")
     ref = {"id": ag["id"], "email": ag["email"], "nombre": ag["nombre"], "inmobiliaria": ag["company_nombre"]}
     corregir = request.form.get("corregir") or None
-    if tipo == "mensual":
+    if tipo == "mensual":  # cada línea guarda sus operaciones (desglose congelado al facturar)
         disp = [{"id": l["id"], "monto": l["monto"], "mes": l["mes"], "referido": l["referido"], "nivel": l["nivel"],
-                 "base_elegible": l["base_elegible"], "cobro_hasta": l["cobro_hasta"]}
+                 "referido_inmobiliaria": l["referido_inmobiliaria"], "porcentaje": l["porcentaje"], "base": l["base"],
+                 "base_elegible": l["base_elegible"], "cobro_hasta": l["cobro_hasta"], "desglose": calculo.desglose(l)}
                 for l in lineas_programa() if l["referidor_id"] == ag["id"] and l["estado"] == "disponible"]
         s = almacen.facturar(CFG, hoy(), ref, "mensual", disp, pdf and pdf[:2], xml and xml[:2], u["email"], corregir)
     elif tipo == "anterior":
@@ -493,8 +552,8 @@ def _puede_ver(u, s):
 def _sol_admin(s):
     r = _sol_publica(s) | {"referidor_id": s["referidor_id"], "referidor_nombre": s["referidor_nombre"],
                            "referidor_email": s["referidor_email"], "inmobiliaria": s["inmobiliaria"]}
-    if s["estado"] == "aprobado" and s.get("pago_hasta"):
-        r["dias_para_pagar"] = (date.fromisoformat(s["pago_hasta"]) - hoy()).days
+    if s["estado"] == "aprobado":  # días contra la fecha de pago aproximada (negativo = ya pasó)
+        r["dias_para_pagar"] = (date.fromisoformat(r["pago_estimado"]) - hoy()).days
     return r
 
 
@@ -502,7 +561,8 @@ def _sol_admin(s):
 @requiere("finanzas", "kam")
 def api_admin_solicitudes():
     u = usuario()
-    xs = [s for s in almacen.solicitudes() if _puede_ver(u, s)]
+    bono_ = request.args.get("programa") == "bono"
+    xs = [s for s in almacen.solicitudes() if (s["tipo"] == "bono") == bono_ and _puede_ver(u, s)]
     for s in xs:
         s["estado"] = calculo.estado_solicitud(s, hoy(), CFG)
     return jsonify([_sol_admin(s) for s in xs])
@@ -524,8 +584,18 @@ def _revision(s):
     checks.append({"ok": bool(c.get("UUID")), "texto": f"UUID {c.get('UUID') or 'sin timbre fiscal'}",
                    "motivo": "El XML no trae el timbre fiscal (UUID). Sube el XML timbrado por el SAT."})
     con = c.get("Concepto") or ""
-    checks.append({"ok": "referidos" in con.lower(), "texto": f"Concepto: {con or '—'}",
-                   "motivo": f"El concepto debe ser “Comisiones: programa referidos”; la factura dice “{con or 'sin concepto'}”."})
+    if s["tipo"] == "bono":
+        import re
+        pedido = bono.concepto(s["periodo"])
+        ok = bool(re.search(r"bono\s*1\W?5\W?10", con, re.I)) and s["periodo"].lower() in con.lower()
+        checks.append({"ok": ok, "texto": f"Concepto: {con or '—'}" + ("" if ok else f" (debe ser “{pedido}”)"),
+                       "motivo": f"El concepto debe ser “{pedido}”; la factura dice “{con or 'sin concepto'}”."})
+        for l in s["lineas"]:
+            for a in l.get("avisos") or []:
+                checks.append({"ok": False, "texto": a, "motivo": None})
+    else:
+        checks.append({"ok": "referidos" in con.lower(), "texto": f"Concepto: {con or '—'}",
+                       "motivo": f"El concepto debe ser “Comisiones: programa referidos”; la factura dice “{con or 'sin concepto'}”."})
     ultimo = next((e for e in reversed(almacen.eventos(s["id"])) if e["a"] == "facturado"), None)
     if ultimo:
         f = datetime.fromisoformat(ultimo["fecha"]).astimezone(calculo.MX).date()
@@ -543,8 +613,105 @@ def api_admin_solicitud(sid):
     if not _puede_ver(usuario(), s):
         abort(403)
     s["estado"] = calculo.estado_solicitud(s, hoy(), CFG)
-    return jsonify(_sol_admin(s) | {"detalle": s["lineas"], "cfdi": s["cfdi"], "eventos": almacen.eventos(sid),
+    return jsonify(_sol_admin(s) | {"detalle": _con_desglose(s), "cfdi": s["cfdi"], "eventos": almacen.eventos(sid),
                                     "revision": _revision(s)})
+
+
+def _con_desglose(s):
+    """Líneas de la solicitud con las operaciones que generaron cada beneficio. Las facturas anteriores a este cambio
+    no guardaron el desglose: se toma del cálculo actual."""
+    if s["tipo"] != "mensual":
+        return s["lineas"]
+    actuales = None
+    out = []
+    for l in s["lineas"]:
+        if "desglose" not in l:
+            if actuales is None:
+                actuales = {x["id"]: x for x in lineas_programa()}
+            x = actuales.get(l["id"])
+            l = l | {"desglose": calculo.desglose(x | {"monto": l["monto"]}) if x else [],
+                     "referido_inmobiliaria": l.get("referido_inmobiliaria") or (x or {}).get("referido_inmobiliaria"),
+                     "porcentaje": l.get("porcentaje") or (x or {}).get("porcentaje"), "base": l.get("base") or (x or {}).get("base")}
+        out.append(l)
+    return out
+
+
+_COLS_DESGLOSE = ["Mes", "Referido", "Inmobiliaria del referido", "Nivel", "ID de la operación", "Propiedad", "Dirección",
+                  "Fecha de cobro", "Comisión cobrada", "Parte del referido", "Comisión del referido", "% referidos", "Beneficio"]
+
+
+def _filas_desglose(s):
+    filas = []
+    for l in _con_desglose(s):
+        for o in l.get("desglose") or []:
+            filas.append([calculo.etiqueta_mes(l["mes"]), l.get("referido"), l.get("referido_inmobiliaria"), l.get("nivel"),
+                          o["operacion"], o.get("propiedad"), o.get("direccion"), o.get("fecha"), o.get("pago"),
+                          f"{round((o.get('fraccion') or 0) * 100)} %", o.get("comision_referido"),
+                          f"{round((l.get('porcentaje') or 0) * 100)} %", o["beneficio"]])
+    return filas
+
+
+def _csv_desglose(s):
+    import csv
+    import io
+    b = io.StringIO()
+    w = csv.writer(b)
+    w.writerow(_COLS_DESGLOSE)
+    w.writerows(_filas_desglose(s))
+    w.writerow(["Total"] + [""] * (len(_COLS_DESGLOSE) - 2) + [s["monto"]])
+    return ("\ufeff" + b.getvalue()).encode("utf-8")  # con BOM para que Excel respete los acentos
+
+
+def _nombre_desglose(s):
+    return f"Desglose referidos - {s['referidor_nombre']} - {_periodo_sol(s)}.csv".replace("/", "-")
+
+
+def _periodo_sol(s):
+    meses = sorted({l["mes"] for l in s["lineas"] if l.get("mes")})
+    return ", ".join(calculo.etiqueta_mes(m) for m in meses) or s["periodo"]
+
+
+@app.get("/api/admin/solicitud/<sid>/desglose.csv")
+@requiere("finanzas", "kam")
+def api_desglose_csv(sid):
+    s = almacen.solicitud(sid) or abort(404)
+    if not _puede_ver(usuario(), s) or s["tipo"] != "mensual":
+        abort(403 if s["tipo"] == "mensual" else 404)
+    from urllib.parse import quote
+    return Response(_csv_desglose(s), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(_nombre_desglose(s))}"})
+
+
+@app.post("/api/admin/solicitud/<sid>/enviar-desglose")
+@requiere("finanzas", "kam")
+def api_enviar_desglose(sid):
+    """Manda al bróker el desglose de su factura: tabla en el correo + CSV adjunto. Queda en el historial."""
+    from html import escape
+    s = almacen.solicitud(sid) or abort(404)
+    u = usuario()
+    if not _puede_ver(u, s) or s["tipo"] != "mensual":
+        abort(403)
+    nota = str((request.get_json(silent=True) or {}).get("nota", "")).strip()[:1000]
+    filas = _filas_desglose(s)
+    mx = lambda v: f"${v:,.2f}" if isinstance(v, (int, float)) else escape(str(v or ""))  # noqa: E731
+    th = "".join(f'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid #212322;font-size:12px">{escape(c)}</th>'
+                 for c in ("Mes", "Referido", "ID de la operación", "Dirección", "Comisión del referido", "Beneficio"))
+    tr = "".join("<tr>" + "".join(f'<td style="padding:4px 8px;border-bottom:1px solid #F3F3F3;font-size:12px">{c}</td>' for c in (
+        escape(f[0]), escape(f[1] or ""), escape(f[4] or ""), escape(f[6] or ""), mx(f[10]), mx(f[12]))) + "</tr>" for f in filas)
+    html = (f'<div style="font-family:Nunito Sans,Arial,sans-serif;color:#212322">'
+            f'<h2 style="font-family:Georgia,serif;font-weight:400">Desglose de tu beneficio de referidos</h2>'
+            f'<p>Hola {escape(s["referidor_nombre"])}, este es el detalle de las operaciones que generaron tu beneficio de '
+            f'{escape(_periodo_sol(s))} por <b>{mx(s["monto"])}</b> (más IVA).</p>'
+            + (f'<p style="white-space:pre-line">{escape(nota)}</p>' if nota else "")
+            + f'<table style="border-collapse:collapse">{th}{tr}</table>'
+            f'<p style="font-size:12px">El beneficio de cada operación es el porcentaje de tu nivel sobre la comisión que cobró tu referido. '
+            f'Va adjunto en Excel (CSV).</p>'
+            f'<p style="color:#B7B7B7;font-size:12px">Programa de referidos · Pulppo</p></div>')
+    almacen.enviar_correo(s["referidor_email"], f"Desglose de tu beneficio de referidos · {_periodo_sol(s)}", html,
+                          [(_nombre_desglose(s), _csv_desglose(s))], estricto=True)
+    almacen.registrar_evento(sid, u["email"], "finanzas" if "finanzas" in u["roles"] else "kam",
+                             f"Desglose enviado por correo a {s['referidor_email']}")
+    return jsonify(ok=True, para=s["referidor_email"])
 
 
 def _enlace():
@@ -581,10 +748,94 @@ def api_pagar(sid):
     return jsonify(_sol_admin(s))
 
 
+@app.post("/api/admin/solicitud/<sid>/fecha-pago")
+@requiere("finanzas")
+def api_fecha_pago(sid):
+    s = almacen.solicitud(sid) or abort(404)
+    fecha = (request.get_json(silent=True) or {}).get("fecha") or None
+    return jsonify(_sol_admin(almacen.fecha_pago_estimada(sid, usuario()["email"], fecha)))
+
+
 @app.post("/api/admin/solicitud/<sid>/revertir")
 @requiere("finanzas")
 def api_revertir(sid):
     return jsonify(_sol_admin(almacen.regresar_a_revision(sid, usuario()["email"])))
+
+
+# ---------------------------------------------------------------- Bono 1·5·10
+
+_CAMPOS_BONO = ("id", "operacion", "estado_op", "lado", "cierre", "propiedad", "colonia", "valor", "comision", "fraccion", "base",
+                "porcentaje", "monto", "comision_propiedad", "exclusiva_meses", "estado", "grupo", "motivo", "cobrable_desde",
+                "solicitud_id", "avisos")
+
+
+def _broker_bono():
+    """El propio bróker, o el que pide un admin con ?como=<agente_id> (solo lectura)."""
+    u = usuario()
+    como = request.args.get("como")
+    if como and u["roles"]:
+        return como, True
+    if not u.get("agente_id") or not es_broker_bono(u["email"]):
+        abort(403)
+    return u["agente_id"], False
+
+
+@app.get("/api/bono/resumen")
+@requiere()
+def api_bono_resumen():
+    aid, ro = _broker_bono()
+    mias = [l for l in lineas_bono() if l["broker_id"] == aid]
+    if ro and mias and not ve_inmo(usuario(), mias[0]["inmobiliaria"]):
+        abort(403)
+    sols = almacen.solicitudes(aid, "bono")
+    for s in sols:
+        s["estado"] = calculo.estado_solicitud(s, hoy(), CFG)
+    from bson import ObjectId
+    ag = db().agents.find_one({"_id": ObjectId(aid)}, {"firstName": 1, "lastName": 1, "company.name": 1, "type": 1}) or {}
+    ag = {"nombre": f"{ag.get('firstName') or ''} {ag.get('lastName') or ''}".strip(), "company_nombre": (ag.get("company") or {}).get("name"),
+          "tipo": ag.get("type")}
+    visibles = [l for l in mias if l["estado"] != "excluido"]
+    return jsonify({
+        "agente": {"id": aid, "nombre": ag.get("nombre") or usuario()["nombre"], "inmobiliaria": ag.get("company_nombre"),
+                   "tipo": ag.get("tipo")},
+        "totales": bono.resumen(mias), "solo_lectura": ro,
+        "operaciones": [{k: l.get(k) for k in _CAMPOS_BONO} | {"concepto": bono.concepto(l["operacion"])} for l in visibles],
+        "no_aplica": [{k: l.get(k) for k in ("operacion", "cierre", "propiedad", "motivo")} for l in mias if l["estado"] == "excluido"],
+        "solicitudes": [_sol_publica(s) for s in sols],
+        "avisos": [] if ro else almacen.avisos(usuario()["email"], "bono"),
+        "reglas": {"desde": CFG["bono_desde"], "porcentaje": CFG["bono_porcentaje"], "comision_min": CFG["bono_comision_min"],
+                   "meses_exclusiva": CFG["bono_meses_exclusiva"], "pago_min": CFG["pago_dias_min"], "pago_max": CFG["pago_dias_max"]},
+    })
+
+
+@app.post("/api/bono/facturar")
+@requiere()
+def api_bono_facturar():
+    u = usuario()
+    if not u.get("agente_id") or not es_broker_bono(u["email"]):
+        abort(403)
+    oid, corregir = request.form.get("operacion", ""), request.form.get("corregir") or None
+    lineas = []
+    if not corregir:
+        l = next((l for l in lineas_bono() if l["id"] == oid and l["broker_id"] == u["agente_id"]), None)
+        if not l or l["estado"] != "disponible":
+            raise ErrorFlujo("Esta operación no tiene bono disponible para facturar.")
+        lineas = [{k: l[k] for k in ("id", "operacion", "propiedad", "cierre", "comision", "fraccion", "base", "porcentaje",
+                                     "monto", "avisos")}]
+    ag = agente_por_email(u["email"])
+    ref = {"id": ag["id"], "email": ag["email"], "nombre": ag["nombre"], "inmobiliaria": ag["company_nombre"]}
+    pdf, xml = _archivo_subido("pdf"), _archivo_subido("xml")
+    s = almacen.facturar(CFG, hoy(), ref, "bono", lineas, pdf and pdf[:2], xml and xml[:2], u["email"], corregir)
+    return jsonify(_sol_publica(s))
+
+
+@app.get("/api/admin/bono/operaciones")
+@requiere("finanzas", "kam")
+def api_admin_bono_operaciones():
+    u = usuario()
+    xs = [l for l in lineas_bono() if not l["inmobiliaria"] or ve_inmo(u, l["inmobiliaria"])]
+    campos = _CAMPOS_BONO + ("broker_id", "broker", "broker_email", "broker_tipo", "inmobiliaria")
+    return jsonify({"operaciones": [{k: l.get(k) for k in campos} for l in xs], "desde": CFG["bono_desde"]})
 
 
 @app.get("/api/admin/referidores")
