@@ -186,3 +186,7 @@ th .orden:hover { text-decoration: underline; }
   .filtros input[type="search"] { margin-left: 0; min-width: 0; width: 100%; }
 }
 .fecha-pago { min-height: 32px; padding: 4px 8px; font-size: 10pt; }
+.datos-fiscales { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 16px 0 0; padding: 12px 16px; border: 1pt solid var(--linea); border-radius: 2px; font-size: 10pt; }
+.datos-fiscales dt { font: 700 8pt/1.6 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+.datos-fiscales dd { margin: 0; }
+@media (max-width: 760px) { .datos-fiscales { grid-template-columns: 1fr; } .datos-fiscales dd { margin-bottom: 6px; } }

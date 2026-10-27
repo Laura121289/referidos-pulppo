@@ -150,6 +150,8 @@ def leer_cfdi(xml_bytes):
             out["EmisorRfc"], out["EmisorNombre"] = nodo.get("Rfc"), nodo.get("Nombre")
         elif t == "Receptor":
             out["ReceptorRfc"], out["ReceptorNombre"] = nodo.get("Rfc"), nodo.get("Nombre")
+            out["UsoCFDI"], out["RegimenReceptor"] = nodo.get("UsoCFDI"), nodo.get("RegimenFiscalReceptor")
+            out["CPReceptor"] = nodo.get("DomicilioFiscalReceptor")
         elif t == "TimbreFiscalDigital":
             out["UUID"] = (nodo.get("UUID") or "").upper()
         elif t == "Concepto" and "Concepto" not in out:

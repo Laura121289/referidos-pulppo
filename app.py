@@ -433,6 +433,7 @@ def resumen_referidor(ag):
         "lineas": _lineas_publicas(sorted(mias, key=lambda l: (l["mes"], l["referido"]), reverse=True)),
         "anterior": _anterior_de(ag),
         "inicio_programa": CFG["inicio_programa"],
+        "facturar_a": CFG["datos_fiscales"],
         "reglas": {"umbral_profesional": CFG["umbral_profesional"], "umbral_elite": CFG["umbral_elite"],
                    "tope": CFG["tope_por_periodo"], "meses_para_cobrar": CFG["meses_para_cobrar"],
                    "dia_limite": CFG["dia_limite_factura"],
@@ -568,10 +569,18 @@ def _revision(s):
         checks.append({"ok": ok, "texto": f"Subtotal del XML {sub:,.2f} vs monto calculado {s['monto']:,.2f}" + ("" if ok else " (no coincide)"),
                        "motivo": f"El subtotal de la factura (${sub:,.2f}) no coincide con el monto a cobrar (${s['monto']:,.2f}). "
                                  f"Emítela por ${s['monto']:,.2f} más IVA."})
-    rfc = os.environ.get("RFC_PULPPO") or CFG.get("rfc_pulppo")
-    if rfc:
-        checks.append({"ok": (c.get("ReceptorRfc") or "").upper() == rfc.upper(), "texto": f"Receptor {c.get('ReceptorRfc')} (debe ser {rfc})",
-                       "motivo": f"El RFC del receptor debe ser {rfc}; la factura dice {c.get('ReceptorRfc') or 'sin RFC'}."})
+    df = CFG["datos_fiscales"]
+    rfc = os.environ.get("RFC_PULPPO") or CFG.get("rfc_pulppo") or df["rfc"]
+    checks.append({"ok": (c.get("ReceptorRfc") or "").upper() == rfc.upper(), "texto": f"Receptor {c.get('ReceptorRfc')} (debe ser {rfc})",
+                   "motivo": f"El RFC del receptor debe ser {rfc}; la factura dice {c.get('ReceptorRfc') or 'sin RFC'}."})
+    # Datos de CFDI 4.0 del receptor (los XML 3.3 no los traen: no se revisan)
+    for campo, debe, txt, nombre in (("UsoCFDI", df["uso_cfdi"], df["uso_cfdi_txt"], "uso de CFDI"),
+                                     ("RegimenReceptor", df["regimen"], df["regimen_txt"], "régimen fiscal del receptor"),
+                                     ("CPReceptor", df["codigo_postal"], f"C.P. {df['codigo_postal']}", "código postal del receptor")):
+        if c.get(campo):
+            ok = c[campo].upper() == debe
+            checks.append({"ok": ok, "texto": f"{nombre[0].upper()}{nombre[1:]}: {c[campo]}" + ("" if ok else f" (debe ser {txt})"),
+                           "motivo": f"El {nombre} debe ser {txt}; la factura dice {c[campo]}."})
     checks.append({"ok": bool(c.get("UUID")), "texto": f"UUID {c.get('UUID') or 'sin timbre fiscal'}",
                    "motivo": "El XML no trae el timbre fiscal (UUID). Sube el XML timbrado por el SAT."})
     con = c.get("Concepto") or ""
@@ -794,6 +803,7 @@ def api_bono_resumen():
         "no_aplica": [{k: l.get(k) for k in ("operacion", "cierre", "propiedad", "motivo")} for l in mias if l["estado"] == "excluido"],
         "solicitudes": [_sol_publica(s) for s in sols],
         "avisos": [] if ro else almacen.avisos(usuario()["email"], "bono"),
+        "facturar_a": CFG["datos_fiscales"],
         "reglas": {"desde": CFG["bono_desde"], "porcentaje": CFG["bono_porcentaje"], "comision_min": CFG["bono_comision_min"],
                    "meses_exclusiva": CFG["bono_meses_exclusiva"], "pago_min": CFG["pago_dias_min"], "pago_max": CFG["pago_dias_max"]},
     })

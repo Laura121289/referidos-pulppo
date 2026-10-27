@@ -11,6 +11,16 @@
   "pago_dias_min": 30,
   "pago_dias_max": 45,
   "programa_anterior_limite": "2026-12-20",
+  "datos_fiscales": {
+    "razon_social": "PULPPO PROPIEDADES",
+    "rfc": "PPR220215PV1",
+    "domicilio": "Calle Galileo 245, Depto. 3 Local 3, Col. Polanco IV Sección, Miguel Hidalgo, C.P. 11550, Ciudad de México",
+    "codigo_postal": "11550",
+    "regimen": "601",
+    "regimen_txt": "601 · General de Ley Personas Morales",
+    "uso_cfdi": "G03",
+    "uso_cfdi_txt": "G03 · Gastos en general"
+  },
   "bono_desde": "2026-10-01",
   "bono_operaciones_extra": ["2AC-OTIKZQVPB"],
   "bono_porcentaje": 0.05,

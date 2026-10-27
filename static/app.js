@@ -158,6 +158,7 @@ async function vistaAsesor(como = null, nombreComo = "") {
   try { R = await api(`/api/resumen${como ? `?como=${encodeURIComponent(como)}` : ""}`); }
   catch (e) { $("#app").innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
   const a = R.agente, t = R.totales, ro = R.solo_lectura;
+  FACTURAR_A = R.facturar_a;
   const nivelTxt = a.excepcion ? `${NIVEL[a.nivel]} · excepción Master Broker` : NIVEL[a.nivel];
   const red = [1, 2, 3].map((n) => `${R.red[n] || 0} en nivel ${n}`).join(" · ");
   $("#app").innerHTML = `
@@ -231,8 +232,17 @@ function avisosHTML(xs) {
     <div><button class="btn btn-sec btn-chico" id="avisos-ok">Entendido</button></div></div>`;
 }
 
+// Datos fiscales de Pulppo (constancia del SAT): van junto a cada formulario para subir factura
+let FACTURAR_A = null;
+function datosFiscales() {
+  const d = FACTURAR_A;
+  if (!d) return "";
+  return `<dl class="datos-fiscales"><dt>Razón social</dt><dd>${esc(d.razon_social)}</dd><dt>RFC</dt><dd>${esc(d.rfc)}</dd>
+    <dt>Domicilio fiscal</dt><dd>${esc(d.domicilio)}</dd><dt>Régimen fiscal</dt><dd>${esc(d.regimen_txt)}</dd><dt>Uso de CFDI</dt><dd>${esc(d.uso_cfdi_txt)}</dd></dl>`;
+}
+
 function formFactura(tipo, boton, corregir = "") {
-  return `<form data-facturar="${tipo}" data-corregir="${esc(corregir)}" class="fila-form" style="margin-top:16px">
+  return `${datosFiscales()}<form data-facturar="${tipo}" data-corregir="${esc(corregir)}" class="fila-form" style="margin-top:16px">
       <label class="campo"><span class="tag">Factura PDF</span><input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
       <label class="campo"><span class="tag">Factura XML</span><input type="file" name="xml" accept=".xml,text/xml,application/xml" required></label>
       <button class="btn" type="submit">${boton}</button>
@@ -665,7 +675,7 @@ const opTxt = (o) => `${esc(o.operacion)}<span class="motivo">${esc(o.propiedad 
 const estadoBono = (o) => `${chip(o.estado)}${o.motivo ? `<span class="motivo">${esc(o.motivo)}</span>` : ""}`;
 
 function formBono(op, boton, corregir = "") {
-  return `<form data-bono="${esc(op)}" data-corregir="${esc(corregir)}" class="fila-form" style="margin-top:16px">
+  return `${datosFiscales()}<form data-bono="${esc(op)}" data-corregir="${esc(corregir)}" class="fila-form" style="margin-top:16px">
       <label class="campo"><span class="tag">Factura PDF</span><input type="file" name="pdf" accept="application/pdf,.pdf" required></label>
       <label class="campo"><span class="tag">Factura XML</span><input type="file" name="xml" accept=".xml,text/xml,application/xml" required></label>
       <button class="btn" type="submit">${boton}</button>
@@ -680,6 +690,7 @@ async function vistaBono(como = null) {
   try { R = await api(`/api/bono/resumen${como ? `?como=${encodeURIComponent(como)}` : ""}`); }
   catch (e) { $("#app").innerHTML = `<p class="error">${esc(e.message)}</p>`; return; }
   const a = R.agente, t = R.totales, ro = R.solo_lectura, r = R.reglas;
+  FACTURAR_A = R.facturar_a;
   const disp = R.operaciones.filter((o) => o.estado === "disponible");
   const rech = R.solicitudes.filter((s) => s.estado === "rechazado");
   const enRev = R.solicitudes.filter((s) => s.estado === "facturado" || s.estado === "aprobado");
