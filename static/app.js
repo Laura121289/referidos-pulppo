@@ -272,13 +272,13 @@ function calculadoraHTML(montos) {
   return `<section class="bloque" id="calc"><header><h2>Cómo armar tu factura</h2><span class="nota">Elige tu régimen fiscal y te mostramos el IVA y las retenciones que lleva tu factura.</span></header>
     <div class="filtros" role="radiogroup" aria-label="Régimen fiscal">${Object.entries(REGIMENES).map(([k, [l]]) =>
       `<button class="filtro" type="button" role="radio" data-regimen="${k}" aria-pressed="${k === REGIMEN}" aria-checked="${k === REGIMEN}">${l}</button>`).join("")}</div>
+    <p class="nota" style="margin-top:8px">IVA ${pctd(t.iva)} sobre el subtotal. Retención de IVA ${pctd(t.ret_iva)}. Retención de ISR: ${pctd(t.isr_resico)} en RESICO y ${pctd(t.isr_pf)} como persona física con actividad empresarial.</p>
     <div class="fila-form" style="margin:16px 0">
       ${montos.length ? `<label class="campo"><span class="tag">¿Qué vas a facturar?</span><select id="calc-que">${montos.map(([l, v], i) =>
         `<option value="${v}" ${i ? "" : "selected"}>${esc(l)} · ${mxn(v)}</option>`).join("")}<option value="">Otro monto</option></select></label>` : ""}
       <label class="campo"><span class="tag">Subtotal (sin IVA)</span><input type="number" id="calc-monto" min="0" step="0.01" value="${m0 || ""}" placeholder="0.00"></label>
     </div>
     <div class="tabla-scroll"><table class="factura-calc" id="calc-tabla"></table></div>
-    <p class="nota">IVA ${pctd(t.iva)} sobre el subtotal. Retención de IVA ${pctd(t.ret_iva)}. Retención de ISR: ${pctd(t.isr_resico)} en RESICO y ${pctd(t.isr_pf)} como persona física con actividad empresarial.</p>
     <p class="aviso-calc"><b>IMPORTANTE:</b> Esta calculadora es una sugerencia. Consulta con tu contador o la legislación aplicable cómo debe ser la correcta elaboración de tu factura.</p>
   </section>`;
 }
