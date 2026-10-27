@@ -41,6 +41,7 @@ function tabsDe(p) {
 async function iniciar() {
   try { YO = await api("/api/yo"); } catch { return; }
   $("#login").hidden = true; $("#app").hidden = false;
+  try { sessionStorage.removeItem("sso_rebote"); } catch { /* sin almacenamiento */ }  // un logout posterior vuelve a rebotar
   $("#quien").textContent = YO.nombre; $("#sesion").hidden = false;
   const q = new URLSearchParams(location.search);  // ligas directas: /?p=bono&tab=bono_ops
   let guardado = {};
@@ -113,8 +114,16 @@ async function inicio() {
 document.addEventListener("click", (e) => { const t = e.target.closest("[data-prog]"); if (t) abrir(t.dataset.prog); });
 
 function mostrarLogin() {
+  // Login vía broker.pulppo.com (como el Coach IA): rebota una sola vez por pestaña; si volvemos sin sesión, queda el login de acá.
+  const errorUrl = new URLSearchParams(location.search).get("error");
+  if (CONFIG.brokerSsoUrl && !errorUrl) {
+    let rebotado = false;
+    try { rebotado = sessionStorage.getItem("sso_rebote") === "1"; sessionStorage.setItem("sso_rebote", "1"); } catch { /* sin almacenamiento */ }
+    if (!rebotado) return location.replace(CONFIG.brokerSsoUrl);
+  }
   $("#app").hidden = true; $("#login").hidden = false; $("#tabs").hidden = true; $("#sesion").hidden = true;
-  if (new URLSearchParams(location.search).get("error") === "enlace") error("El enlace venció o no es válido. Pide uno nuevo.");
+  if (errorUrl === "enlace") error("El enlace venció o no es válido. Pide uno nuevo.");
+  if (errorUrl === "sso") error("No pudimos entrar con tu cuenta de Pulppo. Intenta de nuevo.");
   if (CONFIG.local) $("#form-local").hidden = false;
   if (!CONFIG.googleClientId) { $("#sin-google").hidden = false; return; }
   const s = Object.assign(document.createElement("script"), { src: "https://accounts.google.com/gsi/client", async: true });
