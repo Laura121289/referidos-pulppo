@@ -42,13 +42,19 @@ async function iniciar() {
   try { YO = await api("/api/yo"); } catch { return; }
   $("#login").hidden = true; $("#app").hidden = false;
   try { sessionStorage.removeItem("sso_rebote"); } catch { /* sin almacenamiento */ }  // un logout posterior vuelve a rebotar
-  $("#quien").textContent = YO.nombre; $("#sesion").hidden = false;
+  pintarQuien(); $("#sesion").hidden = false;
   const q = new URLSearchParams(location.search);  // ligas directas: /?p=bono&tab=bono_ops
   let guardado = {};
   try { guardado = JSON.parse(sessionStorage.getItem("vista") || "{}"); } catch { /* sin almacenamiento */ }
   const p = [q.get("p"), guardado.p].find((x) => YO.programas.includes(x));
   if (p) abrir(p, q.get("tab") || (p === guardado.p ? guardado.tab : null));
   else inicio();
+}
+
+// Nombre, correo y, debajo del correo, el rol de admin (Finanzas / KAM)
+function pintarQuien() {
+  const rol = [YO.roles.includes("finanzas") && "Finanzas", YO.roles.includes("kam") && "KAM"].filter(Boolean).join(" · ");
+  $("#quien").innerHTML = `${YO.nombre && YO.nombre !== YO.email ? `<b>${esc(YO.nombre)}</b>` : ""}<span>${esc(YO.email)}</span>${rol ? `<span class="rol">${rol}</span>` : ""}`;
 }
 
 function marcar(p, tab) {
@@ -141,7 +147,12 @@ $("#marca").addEventListener("click", () => YO && inicio());
 
 // ---------------------------------------------------------------- vista del asesor
 
+// Admin viendo como un bróker: ve lo mismo que él y puede subir su factura en su nombre (queda en el historial con su correo)
+let COMO = null;
+const bannerComo = (nombre, id, volver) => `<div class="banner-como"><span>Viendo como <b>${esc(nombre)}</b>. Puedes subir su factura en su nombre: queda registrada con tu correo.</span><button class="link" id="${id}">${volver}</button></div>`;
+
 async function vistaAsesor(como = null, nombreComo = "") {
+  COMO = como;
   $("#app").innerHTML = `<p class="muted">Calculando tus beneficios…</p>`;
   let R;
   try { R = await api(`/api/resumen${como ? `?como=${encodeURIComponent(como)}` : ""}`); }
@@ -150,7 +161,7 @@ async function vistaAsesor(como = null, nombreComo = "") {
   const nivelTxt = a.excepcion ? `${NIVEL[a.nivel]} · excepción Master Broker` : NIVEL[a.nivel];
   const red = [1, 2, 3].map((n) => `${R.red[n] || 0} en nivel ${n}`).join(" · ");
   $("#app").innerHTML = `
-    ${ro ? `<div class="banner-como"><span>Viendo como <b>${esc(a.nombre)}</b> (solo lectura)</span><button class="link" id="volver-ref">Volver a referidores</button></div>` : ""}
+    ${ro ? bannerComo(a.nombre, "volver-ref", "Volver a referidores") : ""}
     <header class="encabezado">
       <p class="eyebrow">Programa de referidos</p>
       <h1>${esc(a.nombre)}</h1>
@@ -235,7 +246,7 @@ function porFacturarHTML(R, ro) {
   partes.push(`<header><h2>Por facturar</h2><span class="nota">Las facturas se suben del 1 al ${R.reglas.dia_limite} de cada mes. Lo que generas en un mes lo puedes facturar en las ventanas de los ${R.reglas.meses_para_cobrar} meses siguientes.</span></header>`);
   v.rechazadas.forEach((s) => partes.push(`<div class="caja alerta" style="margin-bottom:8px"><h3>Tu factura por ${mxn(s.monto)} fue rechazada</h3>
       <p class="pre"><b>Motivo:</b> ${esc(s.motivo_rechazo)}</p><p>Corrígela y vuelve a subirla a más tardar el <b>${fecha(s.limite_correccion)}</b>.</p>
-      ${ro ? "" : formFactura("mensual", "Subir factura corregida", s.id)}</div>`));
+      ${formFactura("mensual", "Subir factura corregida", s.id)}</div>`));
   v.en_revision.forEach((s) => partes.push(`<div class="caja ${s.estado === "aprobado" ? "ok" : "acento-izq"}" style="margin-bottom:8px">${chip(s.estado)}
       <span class="monto-grande" style="display:inline-block;margin-left:12px;font-size:20pt">${mxn(s.monto)}</span>
       <p>${s.estado === "aprobado" ? "Aprobada." : "Recibimos tu factura. Finanzas y tu KAM la están revisando."} Fecha de pago aproximada: <b>${fecha(s.pago_estimado)}</b>.</p></div>`));
@@ -245,10 +256,11 @@ function porFacturarHTML(R, ro) {
       <p>Emite tu factura a Pulppo por <b>${mxn(v.monto)} más IVA</b> con el concepto <b>“Comisiones: programa referidos”</b> y súbela en PDF y XML
       a más tardar el <b>${fecha(v.ventana_cierra)}</b>.
       ${v.vence && v.vence === v.ventana_cierra ? `De ese monto, ${mxn(v.vence_monto)} ya no podrán esperar a la siguiente ventana.` : v.vence ? `Si no la subes en esta ventana, podrás hacerlo en la siguiente.` : ""}</p>
-      ${ro ? "" : formFactura("mensual", "Enviar factura")}</div>`);
+      ${formFactura("mensual", "Enviar factura")}</div>`);
   } else if (v.proxima_monto) {
     partes.push(`<div class="caja acento-izq"><p class="tag">Listo para la próxima ventana</p><div class="monto-grande">${mxn(v.proxima_monto)}</div>
-      <p>Podrás facturarlo del <b>${fecha(v.proxima_abre)}</b> al <b>${fecha(v.proxima_cierra)}</b>.${v.proxima_vence && v.proxima_vence === v.proxima_cierra ? " Es tu última oportunidad para parte de este monto." : ""}</p></div>`);
+      <p>Podrás facturarlo del <b>${fecha(v.proxima_abre)}</b> al <b>${fecha(v.proxima_cierra)}</b>.${v.proxima_vence && v.proxima_vence === v.proxima_cierra ? " Es tu última oportunidad para parte de este monto." : ""}</p>
+      ${COMO ? `<p class="nota">Como admin puedes subir su factura ahora, sin esperar a la ventana.</p>${formFactura("mensual", "Enviar factura")}` : ""}</div>`);
   } else if (!v.rechazadas.length && !v.en_revision.length) {
     partes.push(`<div class="caja"><p>No tienes montos disponibles para facturar por ahora.</p></div>`);
   }
@@ -263,8 +275,9 @@ async function subirFactura(e) {
   const f = e.target, b = f.querySelector("button"), err = f.querySelector("[data-error]");
   const fd = new FormData(f); fd.append("tipo", f.dataset.facturar);
   if (f.dataset.corregir) fd.append("corregir", f.dataset.corregir);
+  if (COMO) fd.append("como", COMO);
   b.disabled = true; b.textContent = "Enviando…"; err.hidden = true;
-  try { await api("/api/facturar", { method: "POST", body: fd }); vistaAsesor(); }
+  try { await api("/api/facturar", { method: "POST", body: fd }); vistaAsesor(COMO); }
   catch (x) { err.textContent = x.message; err.hidden = false; b.disabled = false; b.textContent = "Enviar factura"; }
 }
 
@@ -306,11 +319,11 @@ function anteriorHTML(A, ro) {
   let accion = "";
   if (s) {
     accion = s.estado === "rechazado"
-      ? `<div class="caja alerta pre" style="margin-top:16px"><b>Rechazada:</b> ${esc(s.motivo_rechazo)} Corrige a más tardar el ${fecha(s.limite_correccion)}.${ro ? "" : formFactura("anterior", "Subir factura corregida", s.id)}</div>`
+      ? `<div class="caja alerta pre" style="margin-top:16px"><b>Rechazada:</b> ${esc(s.motivo_rechazo)} Corrige a más tardar el ${fecha(s.limite_correccion)}.${formFactura("anterior", "Subir factura corregida", s.id)}</div>`
       : `<p style="margin-top:16px">${chip(s.estado)} Solicitud por ${mxn(s.monto)} enviada el ${fecha(s.creada)}.</p>`;
-  } else if (A.disponible > 0 && A.abierto) {
+  } else if (A.disponible > 0 && (A.abierto || COMO)) {  // el admin no tiene límite de tiempo
     accion = `<div class="caja acento-izq" style="margin-top:16px"><p>Puedes cobrar <b>${mxn(A.disponible)}</b> hasta el <b>${fecha(A.limite)}</b>. Después se pierde.
-      Factura por ese monto más IVA con el concepto “Comisiones: programa referidos”.</p>${ro ? "" : formFactura("anterior", "Enviar factura")}</div>`;
+      Factura por ese monto más IVA con el concepto “Comisiones: programa referidos”.</p>${formFactura("anterior", "Enviar factura")}</div>`;
   }
   const pagos = A.pagos.length ? `<details class="mes"><summary><span class="t">Pagos registrados por Finanzas</span><span class="v">${mxn(A.cobrado)}</span></summary>
       <table><thead><tr><th>Concepto</th><th>Periodo</th><th>Emisión</th><th>Pago</th><th>Estado</th><th class="n">Total</th></tr></thead><tbody>
@@ -661,6 +674,7 @@ function formBono(op, boton, corregir = "") {
 }
 
 async function vistaBono(como = null) {
+  COMO = como;
   $("#app").innerHTML = `<p class="muted">Calculando tus bonos…</p>`;
   let R;
   try { R = await api(`/api/bono/resumen${como ? `?como=${encodeURIComponent(como)}` : ""}`); }
@@ -670,7 +684,7 @@ async function vistaBono(como = null) {
   const rech = R.solicitudes.filter((s) => s.estado === "rechazado");
   const enRev = R.solicitudes.filter((s) => s.estado === "facturado" || s.estado === "aprobado");
   $("#app").innerHTML = `
-    ${ro ? `<div class="banner-como"><span>Viendo como <b>${esc(a.nombre)}</b> (solo lectura)</span><button class="link" id="volver-ops">Volver a operaciones</button></div>` : ""}
+    ${ro ? bannerComo(a.nombre, "volver-ops", "Volver a operaciones") : ""}
     <header class="encabezado"><p class="eyebrow">Bono 1·5·10</p><h1>${esc(a.nombre)}</h1>
       <div class="meta"><span>${esc(a.inmobiliaria || "")}${a.tipo === "master" ? " · Master Broker" : ""}</span>
       <span>Operaciones con bono: <b>${R.operaciones.length}</b></span></div><div class="acento"></div></header>
@@ -683,7 +697,7 @@ async function vistaBono(como = null) {
     </div><p class="nota">Cuentan las operaciones cerradas desde el ${fecha(r.desde)}.</p></section>
     <section class="bloque"><header><h2>Por facturar</h2><span class="nota">Una factura por operación, desde el mes siguiente al cierre. El bono no vence.</span></header>
       ${rech.map((s) => `<div class="caja alerta" style="margin-bottom:8px"><h3>Tu factura de la operación ${esc(s.periodo)} por ${mxn(s.monto)} fue rechazada</h3>
-        <p class="pre"><b>Motivo:</b> ${esc(s.motivo_rechazo)}</p><p>Corrígela y vuelve a subirla.</p>${ro ? "" : formBono("", "Subir factura corregida", s.id)}</div>`).join("")}
+        <p class="pre"><b>Motivo:</b> ${esc(s.motivo_rechazo)}</p><p>Corrígela y vuelve a subirla.</p>${formBono("", "Subir factura corregida", s.id)}</div>`).join("")}
       ${enRev.map((s) => `<div class="caja ${s.estado === "aprobado" ? "ok" : "acento-izq"}" style="margin-bottom:8px">${chip(s.estado)}
         <span class="monto-grande" style="display:inline-block;margin-left:12px;font-size:20pt">${mxn(s.monto)}</span> <span class="muted">Operación ${esc(s.periodo)}</span>
         <p>${s.estado === "aprobado" ? "Aprobada." : "Recibimos tu factura. Finanzas la está revisando."}
@@ -691,7 +705,7 @@ async function vistaBono(como = null) {
       ${disp.map((o) => `<div class="caja acento-izq" style="margin-bottom:8px">
         <p class="tag">Operación ${esc(o.operacion)} · ${esc(o.propiedad || "")} · cerrada el ${fecha(o.cierre)}</p><div class="monto-grande">${mxn(o.monto)}</div>
         <p>Emite tu factura a Pulppo por <b>${mxn(o.monto)} más IVA</b> con el concepto <b>“${esc(o.concepto)}”</b> y súbela en PDF y XML.</p>
-        ${ro ? "" : formBono(o.id, "Enviar factura")}</div>`).join("")}
+        ${formBono(o.id, "Enviar factura")}</div>`).join("")}
       ${!disp.length && !rech.length && !enRev.length ? `<div class="caja"><p>No tienes bonos disponibles para facturar por ahora.</p></div>` : ""}
     </section>
     ${R.solicitudes.length ? `<section class="bloque"><header><h2>Mis facturas</h2></header>${tablaSolicitudes(R.solicitudes)}</section>` : ""}
@@ -718,8 +732,9 @@ async function vistaBono(como = null) {
     const b = f.querySelector("button"), err = f.querySelector("[data-error]"), txt = b.textContent;
     const fd = new FormData(f); fd.append("operacion", f.dataset.bono);
     if (f.dataset.corregir) fd.append("corregir", f.dataset.corregir);
+    if (COMO) fd.append("como", COMO);
     b.disabled = true; b.textContent = "Enviando…"; err.hidden = true;
-    try { await api("/api/bono/facturar", { method: "POST", body: fd }); vistaBono(); }
+    try { await api("/api/bono/facturar", { method: "POST", body: fd }); vistaBono(COMO); }
     catch (x) { err.textContent = x.message; err.hidden = false; b.disabled = false; b.textContent = txt; }
   }));
 }

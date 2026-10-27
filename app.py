@@ -478,27 +478,41 @@ def _archivo_subido(campo):
     return (f.filename, f.read(), f.mimetype) if f and f.filename else None
 
 
+def _quien_factura(u):
+    """(agente, rol del evento): el propio asesor, o el que indica un admin con `como` (sube la factura en su nombre)."""
+    como = request.form.get("como")
+    if como:
+        if not u["roles"]:
+            abort(403)
+        ag = agente_por_id(como) or abort(404)
+        if not ve_inmo(u, ag["company_nombre"]):
+            abort(403)
+        return ag, "finanzas" if "finanzas" in u["roles"] else "kam"
+    if not u.get("agente_id"):
+        abort(403)
+    return agente_por_id(u["agente_id"]), "referidor"
+
+
 @app.post("/api/facturar")
 @requiere()
 def api_facturar():
     u = usuario()
-    if not u.get("agente_id"):
-        abort(403)
-    ag = agente_por_id(u["agente_id"])
+    ag, rol = _quien_factura(u)
     tipo = request.form.get("tipo", "mensual")
     pdf, xml = _archivo_subido("pdf"), _archivo_subido("xml")
     ref = {"id": ag["id"], "email": ag["email"], "nombre": ag["nombre"], "inmobiliaria": ag["company_nombre"]}
     corregir = request.form.get("corregir") or None
     if tipo == "mensual":  # cada línea guarda sus operaciones (desglose congelado al facturar)
+        estados = {"disponible"} if rol == "referidor" else {"disponible", "proxima_ventana"}  # el admin no espera a la ventana
         disp = [{"id": l["id"], "monto": l["monto"], "mes": l["mes"], "referido": l["referido"], "nivel": l["nivel"],
                  "referido_inmobiliaria": l["referido_inmobiliaria"], "porcentaje": l["porcentaje"], "base": l["base"],
                  "base_elegible": l["base_elegible"], "cobro_hasta": l["cobro_hasta"], "desglose": calculo.desglose(l)}
-                for l in lineas_programa() if l["referidor_id"] == ag["id"] and l["estado"] == "disponible"]
-        s = almacen.facturar(CFG, hoy(), ref, "mensual", disp, pdf and pdf[:2], xml and xml[:2], u["email"], corregir)
+                for l in lineas_programa() if l["referidor_id"] == ag["id"] and l["estado"] in estados]
+        s = almacen.facturar(CFG, hoy(), ref, "mensual", disp, pdf and pdf[:2], xml and xml[:2], u["email"], corregir, rol)
     elif tipo == "anterior":
         a = _anterior_de(ag)
         s = almacen.facturar(CFG, hoy(), ref, "anterior", [] if corregir else a["entradas"], pdf and pdf[:2], xml and xml[:2],
-                             u["email"], corregir)
+                             u["email"], corregir, rol)
     else:
         abort(400)
     return jsonify(_sol_publica(s))
@@ -789,20 +803,23 @@ def api_bono_resumen():
 @requiere()
 def api_bono_facturar():
     u = usuario()
-    if not u.get("agente_id") or not es_broker_bono(u["email"]):
+    if request.form.get("como"):  # un admin sube la factura en nombre del bróker
+        ag, rol = _quien_factura(u)
+    elif u.get("agente_id") and es_broker_bono(u["email"]):
+        ag, rol = agente_por_email(u["email"]), "referidor"
+    else:
         abort(403)
     oid, corregir = request.form.get("operacion", ""), request.form.get("corregir") or None
     lineas = []
     if not corregir:
-        l = next((l for l in lineas_bono() if l["id"] == oid and l["broker_id"] == u["agente_id"]), None)
+        l = next((l for l in lineas_bono() if l["id"] == oid and l["broker_id"] == ag["id"]), None)
         if not l or l["estado"] != "disponible":
             raise ErrorFlujo("Esta operación no tiene bono disponible para facturar.")
         lineas = [{k: l[k] for k in ("id", "operacion", "propiedad", "cierre", "comision", "fraccion", "base", "porcentaje",
                                      "monto", "avisos")}]
-    ag = agente_por_email(u["email"])
     ref = {"id": ag["id"], "email": ag["email"], "nombre": ag["nombre"], "inmobiliaria": ag["company_nombre"]}
     pdf, xml = _archivo_subido("pdf"), _archivo_subido("xml")
-    s = almacen.facturar(CFG, hoy(), ref, "bono", lineas, pdf and pdf[:2], xml and xml[:2], u["email"], corregir)
+    s = almacen.facturar(CFG, hoy(), ref, "bono", lineas, pdf and pdf[:2], xml and xml[:2], u["email"], corregir, rol)
     return jsonify(_sol_publica(s))
 
 

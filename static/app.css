@@ -36,6 +36,9 @@ a { color: inherit; }
 .logo { width: 32px; height: 32px; margin-left: auto; }
 .sesion { margin-left: auto; display: flex; gap: 12px; align-items: center; font-size: 10pt; color: var(--text-muted); }
 .sesion + .logo { margin-left: 12px; }
+#quien { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.3; }
+#quien b { color: var(--text-primary); font-weight: 600; }
+#quien .rol { font: 700 8pt/1.3 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--text-primary); }
 .tabs { display: flex; gap: 20px; flex-wrap: wrap; }
 .tabs button { font: 700 10pt/1 var(--font-body); color: var(--text-muted); background: none; border: 0; cursor: pointer;
   padding: 22px 0 18px; border-bottom: 2px solid transparent; }
