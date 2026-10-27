@@ -21,6 +21,7 @@
     "uso_cfdi": "G03",
     "uso_cfdi_txt": "G03 · Gastos en general"
   },
+  "impuestos_factura": {"iva": 0.16, "ret_iva": 0.106667, "isr_resico": 0.0125, "isr_pf": 0.10},
   "bono_desde": "2026-10-01",
   "bono_operaciones_extra": ["2AC-OTIKZQVPB"],
   "bono_porcentaje": 0.05,

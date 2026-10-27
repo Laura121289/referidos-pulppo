@@ -433,7 +433,7 @@ def resumen_referidor(ag):
         "lineas": _lineas_publicas(sorted(mias, key=lambda l: (l["mes"], l["referido"]), reverse=True)),
         "anterior": _anterior_de(ag),
         "inicio_programa": CFG["inicio_programa"],
-        "facturar_a": CFG["datos_fiscales"],
+        "facturar_a": CFG["datos_fiscales"] | {"impuestos": CFG["impuestos_factura"]},
         "reglas": {"umbral_profesional": CFG["umbral_profesional"], "umbral_elite": CFG["umbral_elite"],
                    "tope": CFG["tope_por_periodo"], "meses_para_cobrar": CFG["meses_para_cobrar"],
                    "dia_limite": CFG["dia_limite_factura"],
@@ -803,7 +803,7 @@ def api_bono_resumen():
         "no_aplica": [{k: l.get(k) for k in ("operacion", "cierre", "propiedad", "motivo")} for l in mias if l["estado"] == "excluido"],
         "solicitudes": [_sol_publica(s) for s in sols],
         "avisos": [] if ro else almacen.avisos(usuario()["email"], "bono"),
-        "facturar_a": CFG["datos_fiscales"],
+        "facturar_a": CFG["datos_fiscales"] | {"impuestos": CFG["impuestos_factura"]},
         "reglas": {"desde": CFG["bono_desde"], "porcentaje": CFG["bono_porcentaje"], "comision_min": CFG["bono_comision_min"],
                    "meses_exclusiva": CFG["bono_meses_exclusiva"], "pago_min": CFG["pago_dias_min"], "pago_max": CFG["pago_dias_max"]},
     })

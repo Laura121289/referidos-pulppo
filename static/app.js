@@ -186,6 +186,7 @@ async function vistaAsesor(como = null, nombreComo = "") {
       <p class="nota">Programa relanzado: cuenta desde ${mesTxt(R.inicio_programa)}. Lo anterior está en “Programa anterior”, más abajo.</p>
     </section>
     <section class="bloque">${porFacturarHTML(R, ro)}</section>
+    ${calculadoraHTML(montosReferidos(R))}
     ${R.solicitudes.length ? `<section class="bloque"><header><h2>Mis facturas</h2></header>${tablaSolicitudes(R.solicitudes)}</section>` : ""}
     <section class="bloque" id="mis-referidos"><header><h2>${ro ? "Sus referidos" : "Mis referidos"}</h2><span class="nota">Referidos que te pueden generar beneficio, por nivel.</span></header>${referidosHTML(R.referidos)}</section>
     <section class="bloque"><header><h2>Detalle por mes</h2><span class="nota">Beneficio que te generó cada referido en el mes.</span></header>${detalleMeses(R.lineas)}</section>
@@ -193,9 +194,19 @@ async function vistaAsesor(como = null, nombreComo = "") {
     <section class="bloque"><header><h2>Cómo se calcula</h2></header>${reglasHTML(R.reglas)}</section>`;
   $("#volver-ref")?.addEventListener("click", () => ir("referidores"));
   REFERIDOS = R.referidos;
+  activarCalculadora();
   $("#mis-referidos").addEventListener("click", (e) => { const b = e.target.closest("[data-nivel]"); if (b) { NIVEL_REF = b.dataset.nivel; pintarReferidos(); } });
   $("#avisos-ok")?.addEventListener("click", async () => { await post("/api/avisos/leidos?programa=referidos"); $(".avisos").remove(); });
   document.querySelectorAll("form[data-facturar]").forEach((f) => f.addEventListener("submit", subirFactura));
+}
+
+function montosReferidos(R) {
+  const v = R.por_facturar, A = R.anterior, xs = [];
+  if (v.monto) xs.push(["Disponible para facturar", v.monto]);
+  v.rechazadas.forEach((s) => xs.push(["Factura rechazada", s.monto]));
+  if (v.proxima_monto) xs.push(["Próxima ventana", v.proxima_monto]);
+  if (A.disponible > 0 && A.abierto && !A.solicitud) xs.push(["Programa anterior", A.disponible]);
+  return xs;
 }
 
 let REFERIDOS = [], NIVEL_REF = "";
@@ -239,6 +250,64 @@ function datosFiscales() {
   if (!d) return "";
   return `<dl class="datos-fiscales"><dt>Razón social</dt><dd>${esc(d.razon_social)}</dd><dt>RFC</dt><dd>${esc(d.rfc)}</dd>
     <dt>Domicilio fiscal</dt><dd>${esc(d.domicilio)}</dd><dt>Régimen fiscal</dt><dd>${esc(d.regimen_txt)}</dd><dt>Uso de CFDI</dt><dd>${esc(d.uso_cfdi_txt)}</dd></dl>`;
+}
+
+// Cómo armar la factura: IVA y retenciones según el régimen del bróker (Laura, 27-oct-2026)
+const REGIMENES = { resico: ["RESICO", "isr_resico"], pf: ["Persona física con actividad empresarial", "isr_pf"] };
+let REGIMEN = "resico";
+try { REGIMEN = REGIMENES[localStorage.getItem("regimen")] ? localStorage.getItem("regimen") : "resico"; } catch { /* sin almacenamiento */ }
+const pctd = (v) => `${(v * 100).toLocaleString("es-MX", { maximumFractionDigits: 4 })} %`;
+const centavos = (x) => Math.round(x * 100) / 100;
+
+function calcFactura(sub, reg) {
+  const t = FACTURAR_A.impuestos;
+  sub = centavos(sub);
+  const iva = centavos(sub * t.iva), riva = centavos(sub * t.ret_iva), risr = centavos(sub * t[REGIMENES[reg][1]]);
+  return { sub, iva, riva, risr, total: centavos(sub + iva - riva - risr) };
+}
+
+function calculadoraHTML(montos) {
+  if (!FACTURAR_A?.impuestos) return "";
+  const t = FACTURAR_A.impuestos, m0 = montos.length ? montos[0][1] : 0;
+  return `<section class="bloque" id="calc"><header><h2>Cómo armar tu factura</h2><span class="nota">Elige tu régimen fiscal y te mostramos el IVA y las retenciones que lleva tu factura.</span></header>
+    <div class="filtros" role="radiogroup" aria-label="Régimen fiscal">${Object.entries(REGIMENES).map(([k, [l]]) =>
+      `<button class="filtro" type="button" role="radio" data-regimen="${k}" aria-pressed="${k === REGIMEN}" aria-checked="${k === REGIMEN}">${l}</button>`).join("")}</div>
+    <div class="fila-form" style="margin:16px 0">
+      ${montos.length ? `<label class="campo"><span class="tag">¿Qué vas a facturar?</span><select id="calc-que">${montos.map(([l, v], i) =>
+        `<option value="${v}" ${i ? "" : "selected"}>${esc(l)} · ${mxn(v)}</option>`).join("")}<option value="">Otro monto</option></select></label>` : ""}
+      <label class="campo"><span class="tag">Subtotal (sin IVA)</span><input type="number" id="calc-monto" min="0" step="0.01" value="${m0 || ""}" placeholder="0.00"></label>
+    </div>
+    <div class="tabla-scroll"><table class="factura-calc" id="calc-tabla"></table></div>
+    <p class="nota">IVA ${pctd(t.iva)} sobre el subtotal. Retención de IVA ${pctd(t.ret_iva)}. Retención de ISR: ${pctd(t.isr_resico)} en RESICO y ${pctd(t.isr_pf)} como persona física con actividad empresarial.</p>
+  </section>`;
+}
+
+function pintarCalculadora() {
+  const tabla = $("#calc-tabla");
+  if (!tabla) return;
+  const f = calcFactura(Number($("#calc-monto").value) || 0, REGIMEN);
+  tabla.innerHTML = `<thead><tr><th>Tu factura a Pulppo<span class="reg">${esc(REGIMENES[REGIMEN][0])}</span></th><th class="n">Monto</th></tr></thead><tbody>
+    <tr><td>Subtotal</td><td class="n">${mxn(f.sub)}</td></tr>
+    <tr><td>(+) IVA</td><td class="n">${mxn(f.iva)}</td></tr>
+    <tr><td>(−) Retención de IVA</td><td class="n">${mxn(f.riva)}</td></tr>
+    <tr><td>(−) Retención de ISR</td><td class="n">${mxn(f.risr)}</td></tr>
+    <tr class="total"><td>Total factura</td><td class="n">${mxn(f.total)}</td></tr></tbody>`;
+}
+
+function activarCalculadora() {
+  const c = $("#calc");
+  if (!c) return;
+  c.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-regimen]");
+    if (!b) return;
+    REGIMEN = b.dataset.regimen;
+    try { localStorage.setItem("regimen", REGIMEN); } catch { /* sin almacenamiento */ }
+    c.querySelectorAll("[data-regimen]").forEach((x) => { const on = x === b; x.setAttribute("aria-pressed", on); x.setAttribute("aria-checked", on); });
+    pintarCalculadora();
+  });
+  $("#calc-que")?.addEventListener("change", (e) => { if (e.target.value) $("#calc-monto").value = e.target.value; else $("#calc-monto").focus(); pintarCalculadora(); });
+  $("#calc-monto").addEventListener("input", () => { if ($("#calc-que")) $("#calc-que").value = ""; pintarCalculadora(); });
+  pintarCalculadora();
 }
 
 function formFactura(tipo, boton, corregir = "") {
@@ -719,6 +788,7 @@ async function vistaBono(como = null) {
         ${formBono(o.id, "Enviar factura")}</div>`).join("")}
       ${!disp.length && !rech.length && !enRev.length ? `<div class="caja"><p>No tienes bonos disponibles para facturar por ahora.</p></div>` : ""}
     </section>
+    ${calculadoraHTML([...disp.map((o) => [`Operación ${o.operacion}`, o.monto]), ...rech.map((s) => [`Operación ${s.periodo} (rechazada)`, s.monto])])}
     ${R.solicitudes.length ? `<section class="bloque"><header><h2>Mis facturas</h2></header>${tablaSolicitudes(R.solicitudes)}</section>` : ""}
     <section class="bloque"><header><h2>Mis operaciones</h2><span class="nota">Operaciones 1·5·10 en las que fuiste el bróker comprador.</span></header>
       ${R.operaciones.length ? `<div class="tabla-scroll"><table><thead><tr><th>Operación</th><th>Cierre</th><th>Lado</th><th class="n">Comisión</th><th class="n">Tu parte</th><th class="n">Bono ${pct(r.porcentaje)}</th><th>Estado</th></tr></thead><tbody>
@@ -737,6 +807,7 @@ async function vistaBono(como = null) {
       <li>El bono se genera cuando la operación está concretada y se cobra a partir del mes siguiente al cierre (cierre en abril, se cobra desde mayo).</li>
       <li>Factura una operación a la vez, con el concepto “Bono 1.5.10” y el ID de la operación. Una vez aprobada, se paga en ${r.pago_min} a ${r.pago_max} días.</li></ul></section>`;
   $("#volver-ops")?.addEventListener("click", () => ir("bono_ops"));
+  activarCalculadora();
   $("#avisos-ok")?.addEventListener("click", async () => { await post("/api/avisos/leidos?programa=bono"); $(".avisos").remove(); });
   document.querySelectorAll("form[data-bono]").forEach((f) => f.addEventListener("submit", async (e) => {
     e.preventDefault();

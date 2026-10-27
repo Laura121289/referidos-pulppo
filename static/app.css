@@ -190,3 +190,9 @@ th .orden:hover { text-decoration: underline; }
 .datos-fiscales dt { font: 700 8pt/1.6 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
 .datos-fiscales dd { margin: 0; }
 @media (max-width: 760px) { .datos-fiscales { grid-template-columns: 1fr; } .datos-fiscales dd { margin-bottom: 6px; } }
+.factura-calc { max-width: 560px; width: 100%; }
+.factura-calc th, .factura-calc td { white-space: normal; }
+.factura-calc .reg { display: block; font: 400 9pt/1.3 var(--font-body); color: var(--text-on-dark); }
+.factura-calc thead th { background: var(--surface-dark); color: var(--color-yellow); font: 700 11pt/1.3 var(--font-body); text-transform: none; letter-spacing: 0; padding: 10px 12px; }
+.factura-calc td { padding: 8px 12px; }
+.factura-calc tr.total td { background: var(--surface-dark); color: var(--text-on-dark); font-weight: 700; }
