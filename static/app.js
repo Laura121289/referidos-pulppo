@@ -279,6 +279,7 @@ function calculadoraHTML(montos) {
     </div>
     <div class="tabla-scroll"><table class="factura-calc" id="calc-tabla"></table></div>
     <p class="nota">IVA ${pctd(t.iva)} sobre el subtotal. Retención de IVA ${pctd(t.ret_iva)}. Retención de ISR: ${pctd(t.isr_resico)} en RESICO y ${pctd(t.isr_pf)} como persona física con actividad empresarial.</p>
+    <p class="aviso-calc"><b>IMPORTANTE:</b> Esta calculadora es una sugerencia. Consulta con tu contador cómo debe ser la correcta elaboración de tu factura.</p>
   </section>`;
 }
 
