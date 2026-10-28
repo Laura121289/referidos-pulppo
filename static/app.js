@@ -713,7 +713,7 @@ async function vistaSimulacion(desde = "2026-01") {
   const cols = [["sin_reglas", "Sin reglas nuevas"], ["excluido_mb", "MB propia inmo"], ["estandar", "Referidor Estándar"], ["modulo1", "Sin Módulo 1"], ["regalia", "Regalía no pagada"], ["tope", "Tope"], ["pendiente", "Pendiente"], ["a_pagar", "A pagar"]];
   const tot = (k) => S.meses.reduce((a, m) => a + m[k], 0);
   $("#app").innerHTML = `<header class="encabezado"><p class="eyebrow">Solo admins</p><h1>Simulación de reglas nuevas</h1>
-      <p class="nota">Qué se habría pagado si las reglas nuevas aplicaran desde ${esc(mesTxt(desde))}, sin plazos de cobro. ${esc(S.nota)}</p><div class="acento"></div></header>
+      <p class="nota">Qué se habría pagado si las reglas nuevas aplicaran desde ${esc(mesTxt(desde))} hasta ${esc(mesTxt(S.hasta))}, sin plazos de cobro. Los meses de 2026 que aún no terminan aparecen conforme pasan. ${esc(S.nota)}</p><div class="acento"></div></header>
     <div class="filtros"><label class="campo"><span class="tag">Desde</span><input type="month" id="sim-desde" value="${desde}"></label></div>
     <div class="tabla-scroll"><table><thead><tr><th>Mes</th>${cols.map(([, l]) => `<th class="n">${l}</th>`).join("")}</tr></thead><tbody>
     ${S.meses.map((m) => `<tr><td>${esc(mesTxt(m.mes))}</td>${cols.map(([k]) => `<td class="n">${mxn0(m[k])}</td>`).join("")}</tr>`).join("")}

@@ -1,5 +1,6 @@
 {
-  "inicio_programa": "2026-11",
+  "inicio_programa": "2027-01",
+  "simulacion_hasta": "2026-12",
   "umbral_profesional": 200000,
   "umbral_elite": 600000,
   "porcentaje_por_nivel": {"1": 0.03, "2": 0.02, "3": 0.01},

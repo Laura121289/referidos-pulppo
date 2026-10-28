@@ -935,8 +935,9 @@ def api_simulacion():
         else:
             m["a_pagar"] += l["monto"]
             m["tope"] += l["monto_sin_reglas"] - l["monto"]
-    filas = [{k: (round(v, 2) if isinstance(v, float) else v) for k, v in m.items()} for _, m in sorted(meses.items())]
-    return jsonify({"desde": desde, "meses": filas, "nota": "La plataforma reparte la comisión distinto (50 % productor / 50 % comprador); "
+    tope = CFG.get("simulacion_hasta", "9999-12")  # la simulación cubre 2026 completo (el programa nuevo arranca en 2027)
+    filas = [{k: (round(v, 2) if isinstance(v, float) else v) for k, v in m.items()} for mes, m in sorted(meses.items()) if mes <= tope]
+    return jsonify({"desde": desde, "hasta": tope, "meses": filas, "nota": "La plataforma reparte la comisión distinto (50 % productor / 50 % comprador); "
                     "aquí se usa la regla 25/25/50 acordada."})
 
 
