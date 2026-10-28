@@ -523,15 +523,41 @@ def resumen(lineas):
 
 # ---------------------------------------------------------------- programa anterior (accountingentries)
 
-def programa_anterior(db, excluidas=()):
-    """Saldos del programa anterior por referidor (uid). No se recalculan: solo se quita lo que el Master Broker
-    generó por referidos de su propia inmobiliaria. Mismo filtro de inmobiliarias que el programa nuevo
-    (referidor y referido con usuario e inmobiliaria activa, sin Habi, pruebas ni excluidas).
+def tramo_anterior(mes, cfg):
+    """Tramo de cobro del programa anterior para una entrada de ese mes ('septiembre 2026' o 'AAAA-MM'), Laura 28-oct-2026:
+    lo generado hasta noviembre 2026 se factura hasta programa_anterior_limite (20-dic); lo de diciembre, del 1 al 10 de
+    enero de 2027 con las reglas anteriores. Devuelve {"id", "desde", "hasta"} (fechas date; desde None = ya abierto)."""
+    dic = cfg.get("anterior_diciembre")
+    m = mes_de_etiqueta(mes) or mes
+    if dic and m and m >= dic["mes"]:
+        return {"id": "diciembre", "desde": date.fromisoformat(dic["desde"]), "hasta": date.fromisoformat(dic["hasta"])}
+    return {"id": "previo", "desde": None, "hasta": date.fromisoformat(cfg["programa_anterior_limite"])}
 
-    Devuelve {uid: {"email", "nombre", "disponible", "excluido_mb", "en_proceso", "cobrado", "potencial", "entradas": [...]}}
+
+def tramo_abierto(cfg, hoy):
+    """El tramo del programa anterior que se puede facturar hoy (None si ninguno)."""
+    for t in (tramo_anterior("2000-01", cfg), cfg.get("anterior_diciembre") and tramo_anterior(cfg["anterior_diciembre"]["mes"], cfg)):
+        if t and (t["desde"] is None or t["desde"] <= hoy) and hoy <= t["hasta"]:
+            return t
+    return None
+
+
+def programa_anterior(db, excluidas=(), con_contrato=(), deudas=None, adeudo_desde="2026-11"):
+    """Saldos del programa anterior por referidor (uid). No se recalculan: solo se quita lo que el Master Broker
+    generó por referidos de su propia inmobiliaria, salvo que su inmobiliaria tenga el programa por contrato
+    (con_contrato, Laura 28-oct-2026). Mismo filtro de inmobiliarias que el programa nuevo (referidor y referido con
+    usuario e inmobiliaria activa, sin Habi, pruebas ni excluidas). Desde adeudo_desde (mes de la entrada = `close`),
+    si la inmobiliaria del referido o la del referidor debía una regalía vencida en ese mes, la entrada se pierde
+    (deudas = adeudos(datos)).
+
+    Devuelve {uid: {"email", "nombre", "disponible", "excluido_mb", "perdido_adeudo", "en_proceso", "cobrado",
+    "entradas": [...], "perdidas": [...]}}
     """
     from bson import ObjectId
-    out = defaultdict(lambda: {"disponible": 0.0, "excluido_mb": 0.0, "en_proceso": 0.0, "cobrado": 0.0, "entradas": []})
+    out = defaultdict(lambda: {"disponible": 0.0, "excluido_mb": 0.0, "perdido_adeudo": 0.0, "en_proceso": 0.0, "cobrado": 0.0,
+                               "entradas": [], "perdidas": []})
+    contrato = {norm_exacto(x) for x in con_contrato}
+    deudas = deudas or {}
     entradas = list(db.accountingentries.find({}, {"referrer.uid": 1, "referrer.email": 1, "referrer.firstName": 1,
                                                     "referrer.lastName": 1, "referrer.level": 1, "referrer.company": 1,
                                                     "agent._id": 1, "agent.firstName": 1, "agent.lastName": 1,
@@ -562,9 +588,20 @@ def programa_anterior(db, excluidas=()):
             continue
         rc, xc = _get(ra, ("company", "_id")), _get(e, ("agent", "company", "_id"))
         rn, xn = norm_company(_get(ra, ("company", "name"))), norm_company(_get(e, ("agent", "company", "name")))
-        propia = ra.get("type") == "master" and ((rc and rc == xc) or (rn and rn == xn))
+        propia = (ra.get("type") == "master" and ((rc and rc == xc) or (rn and rn == xn))
+                  and norm_exacto(_get(ra, ("company", "name"))) not in contrato)
         st = e.get("status")
-        if st == "available":
+        mes = mes_de_etiqueta(e.get("close"))
+        debe = [(comps[c]["nombre"], q, k) for c, q in ((xc, "del referido"), (rc, "del referidor"))
+                if c and mes and mes >= adeudo_desde and (k := adeudo_en(deudas, str(c), mes))
+                and (q == "del referido" or rc != xc)]
+        if st == "available" and debe and not propia:
+            r["perdido_adeudo"] += v
+            r["perdidas"].append({"id": str(e["_id"]), "monto": round(v, 2), "mes": e.get("close"), "operacion": e.get("operation"),
+                                  "referido": f"{_get(e, ('agent', 'firstName')) or ''} {_get(e, ('agent', 'lastName')) or ''}".strip(),
+                                  "motivo": "Adeudo de regalías: " + "; ".join(f"la inmobiliaria {q} ({n}) debía {etiqueta_mes(k)}"
+                                                                              for n, q, k in debe)})
+        elif st == "available":
             if propia:
                 r["excluido_mb"] += v
             else:
@@ -576,6 +613,6 @@ def programa_anterior(db, excluidas=()):
         elif st == "payment-pending":
             r["en_proceso"] += v
     for r in out.values():
-        for k in ("disponible", "excluido_mb", "en_proceso", "cobrado"):
+        for k in ("disponible", "excluido_mb", "perdido_adeudo", "en_proceso", "cobrado"):
             r[k] = round(r[k], 2)
     return dict(out)

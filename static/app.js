@@ -401,8 +401,10 @@ function anteriorHTML(A, ro) {
     accion = s.estado === "rechazado"
       ? `<div class="caja alerta pre" style="margin-top:16px"><b>Rechazada:</b> ${esc(s.motivo_rechazo)} Corrige a más tardar el ${fecha(s.limite_correccion)}.${formFactura("anterior", "Subir factura corregida", s.id)}</div>`
       : `<p style="margin-top:16px">${chip(s.estado)} Solicitud por ${mxn(s.monto)} enviada el ${fecha(s.creada)}.</p>`;
+  } else if (A.proximo) {
+    accion = `<p class="nota" style="margin-top:16px">Lo generado en diciembre 2026 se factura del ${fecha(A.desde)} al ${fecha(A.limite)}, con las reglas del programa anterior.</p>`;
   } else if (A.disponible > 0 && A.abierto) {
-    accion = `<div class="caja acento-izq" style="margin-top:16px"><p>Puedes cobrar <b>${mxn(A.disponible)}</b> hasta el <b>${fecha(A.limite)}</b>. Después se pierde.
+    accion = `<div class="caja acento-izq" style="margin-top:16px"><p>Puedes cobrar <b>${mxn(A.disponible)}</b>${A.tramo === "diciembre" ? " generados en diciembre 2026" : ""} hasta el <b>${fecha(A.limite)}</b>. Después se pierde.
       Factura por ese monto más IVA con el concepto “Comisiones: programa referidos”.</p>${formFactura("anterior", "Enviar factura")}</div>`;
   }
   const pagos = A.pagos.length ? `<details class="mes"><summary><span class="t">Pagos registrados por Finanzas</span><span class="v">${mxn(A.cobrado)}</span></summary>
@@ -415,7 +417,13 @@ function anteriorHTML(A, ro) {
       ${stat(A.en_proceso_plataforma + A.por_pagar_cxp, "En proceso", "Solicitado, por pagar")}
       ${stat(A.cobrado, "Cobrado", "Total facturado con IVA, según Finanzas")}
     </div>
+    ${A.tramo === "previo" ? `<p class="nota">Lo generado hasta noviembre 2026 se cobra a más tardar el ${fecha(A.limite)}. Lo de diciembre se factura del 1 al 10 de enero de 2027.</p>` : ""}
     ${A.excluido_mb ? `<p class="nota">No incluye ${mxn(A.excluido_mb)} generados por referidos de tu propia inmobiliaria: como Master Broker no cobras por tu equipo.</p>` : ""}
+    ${A.perdido_adeudo ? `<details class="mes"><summary><span class="t">Perdido por adeudo de regalías</span><span class="v">${mxn(A.perdido_adeudo)}</span></summary>
+      <p class="nota">Desde noviembre 2026, si la inmobiliaria de tu referido o la tuya debe una regalía vencida, lo generado en ese mes se pierde.</p>
+      <table><thead><tr><th>Mes</th><th>Referido</th><th>Operación</th><th class="n">Beneficio</th><th>Motivo</th></tr></thead><tbody>
+      ${A.perdidas.map((p) => `<tr><td>${esc(p.mes)}</td><td>${esc(p.referido)}</td><td>${esc(p.operacion || "")}</td><td class="n">${mxn(p.monto)}</td><td><span class="motivo">${esc(p.motivo)}</span></td></tr>`).join("")}
+      </tbody></table></details>` : ""}
     ${accion}${pagos}`;
 }
 

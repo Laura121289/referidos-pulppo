@@ -12,6 +12,9 @@
   "pago_dias_min": 30,
   "pago_dias_max": 45,
   "programa_anterior_limite": "2026-12-20",
+  "anterior_adeudo_desde": "2026-11",
+  "anterior_diciembre": {"mes": "2026-12", "desde": "2027-01-01", "hasta": "2027-01-10"},
+  "inmobiliarias_con_contrato": ["Rubí Inmobiliaria", "We Book Realty", "Haz Inmobiliaria", "5a Avenida Real Estate", "Harza Real Estate", "Ponton Asesores", "Vive Chic Real Estate", "Vamos a Vender", "T-Ubika Real Estate", "Rocha Inmobiliaria", "Property Match", "Opcion Inmobiliaria", "Malgram International", "INMOShop", "Inmobiliaria 24Siete", "iElement inmobiliaria", "HUMUS GRUPO INMOBILIARIO", "HS Real Estate", "Habitare Luxury Living", "Habitanza", "GLOMAD", "Diamond House", "Degohouse", "1Crea Bienes Raices", "Covein Bienes Raices", "Cece", "Casane Properties", "BOS Inmobiliaria", "Bloco Bienes Raices", "Arrendo Properties"],
   "datos_fiscales": {
     "razon_social": "PULPPO PROPIEDADES",
     "rfc": "PPR220215PV1",

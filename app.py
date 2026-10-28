@@ -128,7 +128,9 @@ def lineas_programa():
 
 
 def anterior():
-    return _cacheado("anterior", lambda: calculo.programa_anterior(db(), CFG["inmobiliarias_excluidas"]))
+    return _cacheado("anterior", lambda: calculo.programa_anterior(
+        db(), CFG["inmobiliarias_excluidas"], CFG.get("inmobiliarias_con_contrato", ()), calculo.adeudos(datos()),
+        CFG.get("anterior_adeudo_desde", "2026-11")))
 
 
 def lineas_bono():
@@ -377,14 +379,19 @@ def _sol_publica(s):
 def _anterior_de(ag):
     a = (anterior().get(ag.get("uid")) if ag.get("uid") else None) or {}
     pagos = [r for r in cxp() if r.get("email") == ag["email"]]
-    sol = almacen.solicitudes(ag["id"], "anterior")  # la más reciente primero
+    # tramo que se puede facturar hoy; si ninguno (21-dic en adelante), el de diciembre (próximo o ya cerrado)
+    t = calculo.tramo_abierto(CFG, hoy()) or calculo.tramo_anterior(CFG.get("anterior_diciembre", {}).get("mes", "2000-01"), CFG)
+    entradas = [x for x in a.get("entradas", []) if calculo.tramo_anterior(x["mes"], CFG)["id"] == t["id"]]
+    sol = [s for s in almacen.solicitudes(ag["id"], "anterior")  # la más reciente primero, del tramo que se ve
+           if almacen.tramo_de(s, CFG) == t["id"]]
     cobrado_cxp = round(sum(r["total"] for r in pagos if r["status"].lower() == "pagado"), 2)
     por_pagar_cxp = round(sum(r["total"] for r in pagos if r["status"].lower() != "pagado"), 2)
-    limite = date.fromisoformat(CFG["programa_anterior_limite"])
-    return {"disponible": a.get("disponible", 0), "excluido_mb": a.get("excluido_mb", 0),
+    return {"disponible": round(sum(x["monto"] for x in entradas), 2), "tramo": t["id"],
+            "desde": t["desde"] and t["desde"].isoformat(), "proximo": bool(t["desde"]) and hoy() < t["desde"], "excluido_mb": a.get("excluido_mb", 0),
+            "perdido_adeudo": a.get("perdido_adeudo", 0), "perdidas": a.get("perdidas", []),
             "en_proceso_plataforma": a.get("en_proceso", 0), "cobrado": cobrado_cxp, "por_pagar_cxp": por_pagar_cxp,
-            "pagos": pagos, "entradas": a.get("entradas", []), "limite": limite.isoformat(),
-            "abierto": hoy() <= limite, "solicitud": _sol_publica(sol[0]) if sol else None}
+            "pagos": pagos, "entradas": entradas, "limite": t["hasta"].isoformat(),
+            "abierto": (t["desde"] is None or t["desde"] <= hoy()) and hoy() <= t["hasta"], "solicitud": _sol_publica(sol[0]) if sol else None}
 
 
 def resumen_referidor(ag):

@@ -331,10 +331,11 @@ def facturar(cfg, hoy, referidor, tipo, lineas, pdf, xml, actor, corregir=None, 
         if previa["limite_correccion"] and hoy > date.fromisoformat(previa["limite_correccion"]):
             raise ErrorFlujo("Se venció el plazo para corregir esta factura.")
     elif tipo == "anterior":
-        if any(x["estado"] != "rechazado" for x in solicitudes(referidor["id"], "anterior")):
-            raise ErrorFlujo("Ya enviaste la factura del programa anterior.")
-        if hoy > date.fromisoformat(cfg["programa_anterior_limite"]):
+        t = calculo.tramo_abierto(cfg, hoy)
+        if not t or any(calculo.tramo_anterior(l.get("mes"), cfg)["id"] != t["id"] for l in lineas):
             raise ErrorFlujo("El plazo para cobrar el programa anterior ya venció.")
+        if any(x["estado"] != "rechazado" and tramo_de(x, cfg) == t["id"] for x in solicitudes(referidor["id"], "anterior")):
+            raise ErrorFlujo("Ya enviaste la factura del programa anterior de este periodo.")
     elif tipo == "bono":  # una factura por operación
         ops = {l["id"] for l in lineas}
         if any(x["estado"] != "rechazado" and ops & {l["id"] for l in x["lineas"]} for x in solicitudes(referidor["id"], "bono")):
@@ -383,10 +384,15 @@ def _en_nombre(referidor, rol):
     return "" if rol == "referidor" else f" · Subida por un admin en nombre de {referidor['nombre']}"
 
 
+def tramo_de(s, cfg):
+    """Tramo del programa anterior de una factura ("previo" o "diciembre"), según el mes de sus líneas."""
+    return calculo.tramo_anterior(next((l.get("mes") for l in s.get("lineas") or [] if l.get("mes")), "2000-01"), cfg)["id"]
+
+
 def limite_lineas(s, cfg):
     """Último día para cobrar lo incluido en la factura (el plazo más próximo de sus meses)."""
     if s["tipo"] == "anterior":
-        return date.fromisoformat(cfg["programa_anterior_limite"])
+        return calculo.tramo_anterior(next((l.get("mes") for l in s["lineas"] if l.get("mes")), "2000-01"), cfg)["hasta"]
     if s["tipo"] == "bono":
         return None  # el bono no vence
     fechas = [date.fromisoformat(l["cobro_hasta"]) for l in s["lineas"] if l.get("cobro_hasta")]
