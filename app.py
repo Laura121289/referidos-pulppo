@@ -892,7 +892,7 @@ def api_admin_beneficios():
               "referidor_tipo": R["tipo"], "por_regalia": l["estado"] == "pendiente_regalia" or "regalía" in (l["motivo"] or "")}
         filas.append(f)
         if f["por_regalia"]:
-            k = (l["referido_inmobiliaria"], l["mes"])
+            k = (l.get("regalia_inmobiliaria") or l["referido_inmobiliaria"], l["mes"])
             b = bloqueos.setdefault(k, {"inmobiliaria": k[0], "mes": k[1], "regalia": l["regalia"], "cobro_hasta": l["cobro_hasta"],
                                         "referidores": set(), "pendiente": 0.0, "perdido": 0.0})
             b["referidores"].add(R["nombre"])

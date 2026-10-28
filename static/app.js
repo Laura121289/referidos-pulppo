@@ -345,7 +345,7 @@ function porFacturarHTML(R, ro) {
     partes.push(`<div class="caja"><p>No tienes montos disponibles para facturar por ahora.</p></div>`);
   }
   if (v.pendiente_regalia) {
-    partes.push(`<p class="nota">${mxn(v.pendiente_regalia)} esperan a que la inmobiliaria de tu referido pague su regalía. En cuanto la pague, aparecerán aquí para facturar (ver “Detalle por mes”).</p>`);
+    partes.push(`<p class="nota">${mxn(v.pendiente_regalia)} esperan a que la inmobiliaria de tu referido o la tuya pague su regalía del mes. En cuanto se pague, aparecerán aquí para facturar (ver “Detalle por mes”).</p>`);
   }
   return partes.join("");
 }
@@ -425,7 +425,7 @@ function reglasHTML(r) {
     <li>Se cuenta la comisión cobrada por tu referido en el mes: comprador 50 %, vendedor 25 % y productor 25 % cuando la operación es de ambos lados.</li>
     <li>Tope de ${mxn0(r.tope)} de comisión por referido cada 12 meses, contados desde que completa el Módulo 1 de Academia.</li>
     <li>Cobras el mes si eres <b>Profesional</b> (desde ${mxn0(r.umbral_profesional)} en 6 meses) o <b>Élite</b> (desde ${mxn0(r.umbral_elite)}). Si eres Estándar, ese mes se pierde.</li>
-    <li>Solo cuenta si la inmobiliaria de tu referido pagó la regalía del mes.</li>
+    <li>Solo cuenta si la inmobiliaria de tu referido y la tuya pagaron la regalía del mes.</li>
     <li>Si eres Master Broker, no cobras por los asesores de tu propia inmobiliaria.</li>
     <li>Las facturas se suben del 1 al ${r.dia_limite} de cada mes. Lo que generas en un mes lo puedes facturar en las ventanas de los ${r.meses_para_cobrar} meses siguientes (lo de octubre, del 1 al ${r.dia_limite} de noviembre o del 1 al ${r.dia_limite} de diciembre). Después se pierde.</li>
     <li>Una vez aprobada tu factura, se paga en ${r.pago_min} a ${r.pago_max} días.</li></ul>`;

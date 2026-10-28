@@ -13,7 +13,8 @@ Reglas implementadas
 - Referidor: debe tener el Módulo 1 y ser Profesional o Élite en el mes (comisión de los 6 meses cerrados anteriores,
   con 25/25/50; umbrales de config). Si es Estándar, ese mes se pierde. Excepciones: no dependen del nivel y acumulan.
 - Master Broker: nunca cobra por referidos de su propia inmobiliaria (mismo _id o mismo nombre normalizado).
-- Regalía: solo se cobra el mes si la inmobiliaria del referido pagó su regalía (`closes.status = paid`).
+- Regalía: solo se cobra el mes si la inmobiliaria del referido **y** la del referidor pagaron su regalía de ese mes
+  (`closes.status = paid`; Laura, 28-oct-2026). Si son la misma inmobiliaria, se revisa una vez.
 - Factura: siempre del día 1 al 10 de cada mes. Plazo de cobro (Laura, 15-oct-2026): lo generado en el mes M se puede
   facturar en las ventanas del 1 al 10 de los 2 meses siguientes (ej. octubre → 1–10 de noviembre o 1–10 de diciembre).
   Es un colchón por si la inmobiliaria del referido se atrasa con su regalía. Al terminar el plazo (día 10 de M+2):
@@ -302,6 +303,25 @@ def estado_solicitud(s, hoy, cfg):
     return s["estado"]
 
 
+def regalia_del_mes(regalias, X, R, cx, cr, m):
+    """Regalía que decide el mes: la de la inmobiliaria del referido y la del referidor deben estar pagadas.
+
+    Devuelve (regalía que detiene o, si ambas pagaron, la que se pagó al último; "del referido" / "del referidor" /
+    "del referido y la del referidor"; nombre de la inmobiliaria que detiene)."""
+    rx, rr = regalias.get((X["company_id"], m)), regalias.get((R["company_id"], m))
+    if R["company_id"] == X["company_id"]:
+        return rx, "del referido", cx["nombre"]
+    px, pr = bool(rx) and rx["estado"] == "paid", bool(rr) and rr["estado"] == "paid"
+    if px and pr:
+        ultima = rr if (rr.get("pagada_en") or date.min) > (rx.get("pagada_en") or date.min) else rx
+        return ultima, "del referido", cx["nombre"]
+    if not px and not pr:
+        return rx, "del referido y la del referidor", f"{cx['nombre']} y {cr['nombre']}"
+    if not pr:
+        return rr, "del referidor", cr["nombre"]
+    return rx, "del referido", cx["nombre"]
+
+
 def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simulacion=False):
     """Devuelve {"lineas": [...], "referidores": {id: resumen}} para los meses desde..mes actual.
 
@@ -363,8 +383,9 @@ def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simula
                 continue
 
             # Estado del mes antes del tope (lo vencido o perdido no consume tope)
-            reg = datos["regalias"].get((X["company_id"], m))
+            reg, quien, ln["regalia_inmobiliaria"] = regalia_del_mes(datos["regalias"], X, R, cx, cr, m)
             ln["regalia"] = reg["estado"] if reg else "sin_cierre"
+            dos = " y " in quien
             limite = cobro_hasta(m, cfg)
             ln["cobro_hasta"] = None if es_exc else limite.isoformat()
             sol = en_solicitud.get(ln["id"])
@@ -380,13 +401,13 @@ def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simula
                 if pagada:
                     ln["estado"] = "disponible"
                 else:
-                    ln.update(estado="perdido", motivo="La inmobiliaria del referido no ha pagado la regalía del mes")
+                    ln.update(estado="perdido", motivo=f"La inmobiliaria {quien} no {'han' if dos else 'ha'} pagado la regalía del mes")
                     continue
             elif hoy > limite and not es_exc:  # terminó el plazo de 2 meses (las excepciones acumulan)
                 if pagada and (not reg.get("pagada_en") or reg["pagada_en"] <= limite):
                     ln.update(estado="vencido", motivo=f"No se facturó a tiempo (el plazo terminó el {fecha_txt(limite)})")
                 else:
-                    ln.update(estado="perdido", motivo=f"La inmobiliaria del referido no pagó la regalía del mes antes del {fecha_txt(limite)}")
+                    ln.update(estado="perdido", motivo=f"La inmobiliaria {quien} no {'pagaron' if dos else 'pagó'} la regalía del mes antes del {fecha_txt(limite)}")
                 continue
             elif pagada:
                 if ventana_abierta(hoy, cfg):
@@ -396,9 +417,10 @@ def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simula
                     ln.update(estado="proxima_ventana",
                               motivo=f"Se factura del 1 al {cfg['dia_limite_factura']} de {MESES[sig.month - 1]}")
             else:
-                que = "tiene su cierre del mes vencido" if ln["regalia"] == "expired" else "aún no paga la regalía del mes"
+                que = (("tienen" if dos else "tiene") + " su cierre del mes vencido" if ln["regalia"] == "expired"
+                       else "aún no " + ("pagan" if dos else "paga") + " la regalía del mes")
                 hasta_txt = "" if es_exc else f"; si la paga a más tardar el {fecha_txt(limite)}, podrás cobrarlo"
-                ln.update(estado="pendiente_regalia", motivo=f"La inmobiliaria del referido {que}{hasta_txt}")
+                ln.update(estado="pendiente_regalia", motivo=f"La inmobiliaria {quien} {que}{hasta_txt}")
 
             if ln["estado"] == "vencido":
                 continue
