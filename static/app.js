@@ -174,7 +174,7 @@ async function vistaAsesor(como = null, nombreComo = "") {
       </div>
       <div class="acento"></div>
     </header>
-    ${!a.afiliado ? `<div class="caja alerta" style="margin-bottom:24px"><b>Completa el Módulo 1 de Academia.</b> Sin él no cobras beneficios por tus referidos.</div>` : ""}
+    ${!a.afiliado && !a.excepcion ? `<div class="caja alerta" style="margin-bottom:24px"><b>Completa el Módulo 1 de Academia.</b> Sin él no cobras beneficios por tus referidos.</div>` : ""}
     ${avisosHTML(R.avisos)}
     <section class="bloque">
       <div class="stats">
@@ -753,7 +753,7 @@ async function vistaSimulacion(desde = "2026-01") {
 async function vistaExcepciones() {
   const xs = await api("/api/admin/excepciones");
   $("#app").innerHTML = `<header class="encabezado"><p class="eyebrow">Master Brokers</p><h1>Excepciones</h1>
-      <p class="nota">Cobran sin depender de su nivel Pulppo Plus y acumulan su beneficio. Siguen sin cobrar por su propia inmobiliaria. Las propone Pulppo.</p><div class="acento"></div></header>
+      <p class="nota">Cobran sin depender de su nivel Pulppo Plus ni del Módulo 1 de Academia, y acumulan su beneficio. Siguen sin cobrar por su propia inmobiliaria. Las propone Pulppo.</p><div class="acento"></div></header>
     <table><thead><tr><th>Correo</th><th>Agregada por</th><th>Fecha</th><th></th></tr></thead><tbody>
     ${xs.map((x) => `<tr><td>${esc(x.email)}</td><td>${esc(x.agregada_por)}</td><td>${fecha(x.fecha)}</td><td>${YO.finanzas ? `<button class="btn btn-sec btn-chico" data-quitar="${esc(x.email)}">Quitar</button>` : ""}</td></tr>`).join("")}
     </tbody></table>

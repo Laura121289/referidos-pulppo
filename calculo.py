@@ -11,7 +11,8 @@ Reglas implementadas
 - Porcentaje por nivel de referido: 1 = 3 %, 2 = 2 %, 3 = 1 %. Tope de $600,000 de base por referido en cada periodo
   de 12 meses contados desde su activación (Módulo 1 de Academia). Solo consume tope lo que no se perdió.
 - Referidor: debe tener el Módulo 1 y ser Profesional o Élite en el mes (comisión de los 6 meses cerrados anteriores,
-  con 25/25/50; umbrales de config). Si es Estándar, ese mes se pierde. Excepciones: no dependen del nivel y acumulan.
+  con 25/25/50; umbrales de config). Si es Estándar, ese mes se pierde. Excepciones: no dependen del nivel ni del Módulo 1
+  de Academia (Laura, 28-oct-2026) y acumulan.
 - Master Broker: nunca cobra por referidos de su propia inmobiliaria (mismo _id o mismo nombre normalizado).
 - Regalía: solo se cobra el mes si la inmobiliaria del referido **y** la del referidor pagaron su regalía de ese mes
   (`closes.status = paid`; Laura, 28-oct-2026). Si son la misma inmobiliaria, se revisa una vez.
@@ -412,7 +413,7 @@ def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simula
             if not X["afiliado"] or X["activacion"] > fin_m:
                 ln.update(estado="excluido", motivo="El referido no había completado el Módulo 1 de Academia")
                 continue
-            if not R["afiliado"] or R["activacion"] > fin_m:
+            if not es_exc and (not R["afiliado"] or R["activacion"] > fin_m):  # la excepción no pide Módulo 1
                 ln.update(estado="perdido", motivo="El referidor no había completado el Módulo 1 de Academia")
                 continue
             if nivel_r == "estandar" and not es_exc:
