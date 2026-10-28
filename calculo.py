@@ -562,7 +562,13 @@ def programa_anterior(db, excluidas=(), con_contrato=(), deudas=None, adeudo_des
                                                     "referrer.lastName": 1, "referrer.level": 1, "referrer.company": 1,
                                                     "agent._id": 1, "agent.firstName": 1, "agent.lastName": 1,
                                                     "agent.company": 1, "status": 1, "value": 1, "credit": 1,
-                                                    "debit": 1, "close": 1, "operation": 1, "operationId": 1}))
+                                                    "debit": 1, "close": 1, "operation": 1, "operationId": 1,
+                                                    "comission": 1}))
+    # dirección de la propiedad de cada operación (para el desglose)
+    op_ids = list({e["operationId"] for e in entradas if e.get("operationId") and e.get("status") == "available"})
+    props = {o["_id"]: o.get("property") for o in db.operations.find(
+        {"_id": {"$in": op_ids}}, {"property.internalId": 1, "property.address.street": 1,
+                                   "property.address.neighborhood.name": 1, "property.address.city.name": 1})}
     uids = {_get(e, ("referrer", "uid")) for e in entradas} - {None}
     tipos = {a["uid"]: a for a in db.agents.find({"uid": {"$in": list(uids)}, "deletedAt": None},
                                                   {"uid": 1, "type": 1, "company": 1, "email": 1, "firstName": 1, "lastName": 1})}
@@ -595,10 +601,15 @@ def programa_anterior(db, excluidas=(), con_contrato=(), deudas=None, adeudo_des
         debe = [(comps[c]["nombre"], q, k) for c, q in ((xc, "del referido"), (rc, "del referidor"))
                 if c and mes and mes >= adeudo_desde and (k := adeudo_en(deudas, str(c), mes))
                 and (q == "del referido" or rc != xc)]
+        prop = props.get(e.get("operationId"))
+        fila = {"id": str(e["_id"]), "monto": round(v, 2), "mes": e.get("close"), "operacion": e.get("operation"),
+                "referido": f"{_get(e, ('agent', 'firstName')) or ''} {_get(e, ('agent', 'lastName')) or ''}".strip(),
+                "referido_inmobiliaria": _get(e, ("agent", "company", "name")), "nivel": _get(e, ("referrer", "level")),
+                "comision_referido": round(e.get("comission") or 0, 2), "propiedad": _get(prop, ("internalId",)),
+                "direccion": direccion(prop)}
         if st == "available" and debe and not propia:
             r["perdido_adeudo"] += v
-            r["perdidas"].append({"id": str(e["_id"]), "monto": round(v, 2), "mes": e.get("close"), "operacion": e.get("operation"),
-                                  "referido": f"{_get(e, ('agent', 'firstName')) or ''} {_get(e, ('agent', 'lastName')) or ''}".strip(),
+            r["perdidas"].append({**fila,
                                   "motivo": "Adeudo de regalías: " + "; ".join(f"la inmobiliaria {q} ({n}) debía {etiqueta_mes(k)}"
                                                                               for n, q, k in debe)})
         elif st == "available":
@@ -606,10 +617,7 @@ def programa_anterior(db, excluidas=(), con_contrato=(), deudas=None, adeudo_des
                 r["excluido_mb"] += v
             else:
                 r["disponible"] += v
-                r["entradas"].append({"id": str(e["_id"]), "monto": round(v, 2), "mes": e.get("close"),
-                                      "operacion": e.get("operation"),
-                                      "referido": f"{_get(e, ('agent', 'firstName')) or ''} {_get(e, ('agent', 'lastName')) or ''}".strip(),
-                                      "nivel": _get(e, ("referrer", "level"))})
+                r["entradas"].append(fila)
         elif st == "payment-pending":
             r["en_proceso"] += v
     for r in out.values():

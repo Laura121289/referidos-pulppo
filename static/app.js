@@ -394,6 +394,24 @@ function detalleMeses(todas) {
   }).join("");
 }
 
+function desgloseAnterior(A) {
+  // Por mes de cierre ("septiembre 2026"), del más reciente al más antiguo; una fila por operación del referido
+  if (!A.entradas.length) return "";
+  const MES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const clave = (t) => { const [m, y] = String(t || "").toLowerCase().split(" "); return `${y || "0000"}-${String(MES.indexOf(m) + 1).padStart(2, "0")}`; };
+  const meses = {};
+  A.entradas.forEach((x) => (meses[x.mes || "Sin mes"] ||= []).push(x));
+  return `<h3 style="margin-top:24px">Desglose de lo disponible</h3>` + Object.entries(meses).sort(([a], [b]) => clave(b).localeCompare(clave(a))).map(([m, xs], i) => {
+    const tot = xs.reduce((s, x) => s + x.monto, 0);
+    return `<details class="mes" ${i === 0 ? "open" : ""}><summary><span class="t">${esc(m.charAt(0).toUpperCase() + m.slice(1))}</span><span class="muted">${xs.length} operaci${xs.length === 1 ? "ón" : "ones"}</span><span class="v">${mxn(tot)}</span></summary>
+      <div class="tabla-scroll"><table><thead><tr><th>Referido</th><th>Inmobiliaria</th><th class="n">Nivel</th><th>Operación</th><th>Propiedad</th><th class="n">Comisión del referido</th><th class="n">%</th><th class="n">Beneficio</th></tr></thead><tbody>
+      ${xs.sort((a, b) => (a.referido || "").localeCompare(b.referido || "")).map((x) => `<tr><td>${esc(x.referido)}</td><td>${esc(x.referido_inmobiliaria || "")}</td><td class="n">${esc(x.nivel || "")}</td>
+        <td>${esc(x.operacion || "")}</td><td>${esc(x.direccion || "")}${x.propiedad ? `<span class="motivo">${esc(x.propiedad)}</span>` : ""}</td>
+        <td class="n">${x.comision_referido ? mxn(x.comision_referido) : "—"}</td><td class="n">${x.comision_referido ? pctd(x.monto / x.comision_referido) : "—"}</td><td class="n">${mxn(x.monto)}</td></tr>`).join("")}
+      </tbody></table></div></details>`;
+  }).join("");
+}
+
 function anteriorHTML(A, ro) {
   const s = A.solicitud;
   let accion = "";
@@ -424,7 +442,7 @@ function anteriorHTML(A, ro) {
       <table><thead><tr><th>Mes</th><th>Referido</th><th>Operación</th><th class="n">Beneficio</th><th>Motivo</th></tr></thead><tbody>
       ${A.perdidas.map((p) => `<tr><td>${esc(p.mes)}</td><td>${esc(p.referido)}</td><td>${esc(p.operacion || "")}</td><td class="n">${mxn(p.monto)}</td><td><span class="motivo">${esc(p.motivo)}</span></td></tr>`).join("")}
       </tbody></table></details>` : ""}
-    ${accion}${pagos}`;
+    ${accion}${desgloseAnterior(A)}${pagos}`;
 }
 
 function reglasHTML(r) {
