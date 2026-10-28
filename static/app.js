@@ -426,6 +426,7 @@ function reglasHTML(r) {
     <li>Tope de ${mxn0(r.tope)} de comisión por referido cada 12 meses, contados desde que completa el Módulo 1 de Academia.</li>
     <li>Cobras el mes si eres <b>Profesional</b> (desde ${mxn0(r.umbral_profesional)} en 6 meses) o <b>Élite</b> (desde ${mxn0(r.umbral_elite)}). Si eres Estándar, ese mes se pierde.</li>
     <li>Solo cuenta si la inmobiliaria de tu referido y la tuya pagaron la regalía del mes.</li>
+    <li>Si alguna de las dos debe una regalía vencida, los beneficios se suspenden y los meses con adeudo se pierden.</li>
     <li>Si eres Master Broker, no cobras por los asesores de tu propia inmobiliaria.</li>
     <li>Las facturas se suben del 1 al ${r.dia_limite} de cada mes. Lo que generas en un mes lo puedes facturar en las ventanas de los ${r.meses_para_cobrar} meses siguientes (lo de octubre, del 1 al ${r.dia_limite} de noviembre o del 1 al ${r.dia_limite} de diciembre). Después se pierde.</li>
     <li>Una vez aprobada tu factura, se paga en ${r.pago_min} a ${r.pago_max} días.</li></ul>`;
@@ -623,7 +624,7 @@ async function vistaBeneficios() {
     <section class="bloque"><header><h2>Cierres de regalías que detienen beneficios</h2>
       <span class="nota">Doble check: si la inmobiliaria ya pagó, marca su cierre del mes como pagado en la plataforma y el beneficio se libera.</span></header>
       ${bl.length ? `<div class="tabla-scroll"><table><thead><tr><th>Inmobiliaria del referido</th><th>Mes</th><th>Cierre</th><th>Referidores afectados</th><th class="n">Detenido</th><th class="n">Ya no cobrable</th><th>Se puede facturar hasta</th></tr></thead><tbody>
-      ${bl.map((b) => `<tr><td>${esc(b.inmobiliaria)}</td><td>${esc(mesTxt(b.mes))}</td><td>${esc({ pending: "Pendiente", expired: "Vencido", sin_cierre: "Sin cierre", paid: "Pagado tarde" }[b.regalia] || b.regalia)}</td>
+      ${bl.map((b) => `<tr><td>${esc(b.inmobiliaria)}</td><td>${esc(mesTxt(b.mes))}</td><td>${esc({ pending: "Pendiente", expired: "Vencido", adeudo: "Adeudo de regalías", sin_cierre: "Sin cierre", paid: "Pagado tarde" }[b.regalia] || b.regalia)}</td>
         <td>${esc(b.referidores.join(", "))}</td><td class="n">${b.pendiente ? mxn(b.pendiente) : "—"}</td><td class="n ${b.perdido ? "rojo" : ""}">${b.perdido ? mxn(b.perdido) : "—"}</td>
         <td>${b.perdido ? `<span class="rojo">Terminó</span>` : fecha(b.cobro_hasta)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">No hay beneficios detenidos por regalías.</p>`}
     </section>

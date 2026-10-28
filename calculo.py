@@ -15,6 +15,9 @@ Reglas implementadas
 - Master Broker: nunca cobra por referidos de su propia inmobiliaria (mismo _id o mismo nombre normalizado).
 - Regalía: solo se cobra el mes si la inmobiliaria del referido **y** la del referidor pagaron su regalía de ese mes
   (`closes.status = paid`; Laura, 28-oct-2026). Si son la misma inmobiliaria, se revisa una vez.
+- Adeudo (Laura, 28-oct-2026): si en el mes la inmobiliaria del referido o la del referidor debía una regalía vencida
+  (`closes.status = expired`) de un mes anterior, el beneficio de ese mes se pierde. Se reanuda el mes siguiente a que
+  la pague (la app registra cuándo deja de estar vencida: `deudas_vistas`).
 - Factura: siempre del día 1 al 10 de cada mes. Plazo de cobro (Laura, 15-oct-2026): lo generado en el mes M se puede
   facturar en las ventanas del 1 al 10 de los 2 meses siguientes (ej. octubre → 1–10 de noviembre o 1–10 de diciembre).
   Es un colchón por si la inmobiliaria del referido se atrasa con su regalía. Al terminar el plazo (día 10 de M+2):
@@ -71,6 +74,14 @@ def dia(m, d):
 
 def etiqueta_mes(m):
     return f"{MESES[int(m[5:7]) - 1]} {m[:4]}"
+
+
+def mes_de_etiqueta(t):
+    """'septiembre 2026' → '2026-09' (None si no se reconoce)."""
+    partes = str(t or "").strip().lower().split()
+    if len(partes) != 2 or partes[0] not in MESES or not partes[1].isdigit():
+        return None
+    return f"{int(partes[1]):04d}-{MESES.index(partes[0]) + 1:02d}"
 
 
 def norm_company(name):
@@ -221,9 +232,15 @@ def cargar(db, desde, hasta, excluidas=()):
         if cid:
             # Mongo no guarda cuándo se pagó: la app registra el primer día que la ve pagada (pagada_en)
             regalias[(str(cid), etiquetas[c["id"]])] = {"estado": c.get("status"), "pagada_en": None}
+    # Regalías vencidas sin pagar de cualquier mes (adeudos)
+    vencidas = set()
+    for c in db.closes.find({"status": "expired"}, {"id": 1, "company._id": 1}):
+        cid, m = _get(c, ("company", "_id")), mes_de_etiqueta(c.get("id"))
+        if cid and m:
+            vencidas.add((str(cid), m))
 
     return {"agentes": agentes, "companias": companias, "red": red, "comisiones": dict(comisiones),
-            "regalias": regalias, "desde": desde, "hasta": hasta}
+            "regalias": regalias, "vencidas": sorted(vencidas), "desde": desde, "hasta": hasta}
 
 
 def _agente(a, cursos_m1):
@@ -322,6 +339,25 @@ def regalia_del_mes(regalias, X, R, cx, cr, m):
     return rx, "del referido", cx["nombre"]
 
 
+def adeudos(datos):
+    """{company_id: [(mes vencido, último mes con adeudo o None si sigue sin pagar)]}.
+
+    vencidas: (company_id, mes) con regalía vencida hoy. deudas_saldadas: [{company_id, mes, saldada_en}] que la app vio
+    vencidas y después dejaron de estarlo (el mes en que se saldó cuenta como mes con adeudo)."""
+    out = defaultdict(list)
+    for cid, m in datos.get("vencidas") or ():
+        out[cid].append((m, None))
+    for s in datos.get("deudas_saldadas") or ():
+        out[s["company_id"]].append((s["mes"], f"{s['saldada_en'].year:04d}-{s['saldada_en'].month:02d}"))
+    return out
+
+
+def adeudo_en(deudas, cid, m):
+    """El mes vencido más antiguo que la inmobiliaria debía durante el mes m (None si no debía nada)."""
+    xs = [k for k, fin in deudas.get(cid, ()) if k < m and (fin is None or fin >= m)]
+    return min(xs) if xs else None
+
+
 def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simulacion=False):
     """Devuelve {"lineas": [...], "referidores": {id: resumen}} para los meses desde..mes actual.
 
@@ -336,6 +372,7 @@ def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simula
     ag, co = datos["agentes"], datos["companias"]
     excep = {e.lower() for e in excepciones}
     pct = {int(k): v for k, v in cfg["porcentaje_por_nivel"].items()}
+    deudas = adeudos(datos)
 
     en_solicitud = {}
     for s in solicitudes:
@@ -395,6 +432,15 @@ def calcular(datos, cfg, hoy, solicitudes=(), excepciones=(), desde=None, simula
                 ln.update(estado=st, solicitud_id=s["id"])
                 if st == "vencido":
                     ln["motivo"] = "La factura rechazada no se corrigió a tiempo"
+            elif lados := [(n, q, k) for c, n, q in ((X["company_id"], cx["nombre"], "del referido"),
+                                                    (R["company_id"], cr["nombre"], "del referidor"))
+                           if (k := adeudo_en(deudas, c, m)) and (q == "del referido" or R["company_id"] != X["company_id"])]:
+                ln.update(estado="perdido", regalia="adeudo", regalia_inmobiliaria=" y ".join(n for n, _, _ in lados),
+                          motivo="Adeudo de regalías: " + "; ".join(f"la inmobiliaria {q} ({n}) debía {etiqueta_mes(k)}"
+                                                                     for n, q, k in lados)
+                                 + (". Mientras no se pague, los beneficios se suspenden y los meses con adeudo se pierden"
+                                    if m >= mes_hoy else " en este mes, así que el beneficio se perdió"))
+                continue
             elif m >= mes_hoy:
                 ln.update(estado="en_curso", motivo="Mes en curso: estimado")
             elif simulacion:

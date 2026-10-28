@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS avisos (
 CREATE TABLE IF NOT EXISTS excepciones (
   email TEXT PRIMARY KEY, agregada_por TEXT, fecha TEXT
 );
+CREATE TABLE IF NOT EXISTS deudas_vistas (
+  company_id TEXT NOT NULL, mes TEXT NOT NULL, vista_en TEXT NOT NULL, saldada_en TEXT, PRIMARY KEY (company_id, mes)
+);
 CREATE TABLE IF NOT EXISTS regalias_vistas (
   company_id TEXT NOT NULL, mes TEXT NOT NULL, pagada_en TEXT NOT NULL, PRIMARY KEY (company_id, mes)
 );
@@ -245,6 +248,28 @@ def registrar_regalias(regalias, hoy):
             ejecutar("INSERT INTO regalias_vistas (company_id, mes, pagada_en) VALUES (?, ?, ?)", (k[0], k[1], hoy.isoformat()))
             vistas[k] = hoy
     return vistas
+
+
+def registrar_deudas(vencidas, hoy):
+    """Guarda cada regalía vencida que se ve y el día en que deja de estarlo; devuelve las ya saldadas
+    [{company_id, mes, saldada_en: date}] (Mongo no guarda cuándo se pagó)."""
+    hoy_txt = hoy.isoformat()
+    actuales = {tuple(v) for v in vencidas}
+    filas = {(r["company_id"], r["mes"]): r for r in ejecutar("SELECT * FROM deudas_vistas")}
+    for k in actuales - set(filas):
+        ejecutar("INSERT INTO deudas_vistas (company_id, mes, vista_en) VALUES (?, ?, ?)", (k[0], k[1], hoy_txt))
+    saldadas = []
+    for k, r in filas.items():
+        fin = r["saldada_en"]
+        if k in actuales and fin:  # volvió a vencer (no debería): sigue como adeudo abierto
+            ejecutar("UPDATE deudas_vistas SET saldada_en = NULL WHERE company_id = ? AND mes = ?", k)
+            continue
+        if k not in actuales and not fin:
+            ejecutar("UPDATE deudas_vistas SET saldada_en = ? WHERE company_id = ? AND mes = ?", (hoy_txt, k[0], k[1]))
+            fin = hoy_txt
+        if fin:
+            saldadas.append({"company_id": k[0], "mes": k[1], "saldada_en": date.fromisoformat(fin)})
+    return saldadas
 
 
 # ---------------------------------------------------------------- solicitudes

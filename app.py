@@ -116,6 +116,7 @@ def datos(desde=None, fresco=False):
     hasta = max(mes_hoy(), desde)
     d = _cacheado(("datos", desde, hasta), lambda: calculo.cargar(db(), desde, hasta, CFG["inmobiliarias_excluidas"]), fresco)
     vistas = almacen.registrar_regalias(d["regalias"], hoy())
+    d["deudas_saldadas"] = almacen.registrar_deudas(d.get("vencidas", ()), hoy())
     for k, v in d["regalias"].items():
         v["pagada_en"] = vistas.get(k)
     return d
