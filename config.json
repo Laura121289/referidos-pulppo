@@ -28,7 +28,7 @@
   "bono_comision_min": 5,
   "bono_meses_exclusiva": 6,
   "bono_dominio": "pulppo.com",
-  "inmobiliarias_excluidas": ["Circulo Bienes Raices", "Ancona Plus", "Inmobiliaria Demo"],
+  "inmobiliarias_excluidas": ["Circulo Bienes Raices", "Ancona Plus", "Inmobiliaria Demo", "BR23"],
   "finanzas": ["laura@pulppo.com", "mitchellmonserrat@tuhabi.mx"],
   "excepciones_iniciales": [
     "joshua@pulppo.com",
