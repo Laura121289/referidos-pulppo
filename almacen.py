@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 LOCAL = Path(os.environ["DATOS_APP"]) if os.environ.get("DATOS_APP") and not os.environ.get("VERCEL") else HERE / "datos-app"
 PG_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
 BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
+BLOB_ACCESO = os.environ.get("BLOB_ACCESO", "private")  # los almacenes de Blob del proyecto son privados
 RESEND_KEY = os.environ.get("RESEND_API_KEY")
 REMITENTE = os.environ.get("CORREO_REMITENTE", "Referidos Pulppo <referidos@pulppo.com>")
 
@@ -112,10 +113,16 @@ def guardar_archivo(nombre, contenido, tipo):
     ruta = f"referidos/{uuid.uuid4().hex}/{nombre}"
     if BLOB_TOKEN:
         import requests
-        r = requests.put(f"https://blob.vercel-storage.com/{ruta}", data=contenido, timeout=60,
-                         headers={"authorization": f"Bearer {BLOB_TOKEN}", "x-api-version": "7",
-                                  "x-content-type": tipo, "x-add-random-suffix": "1"})
-        r.raise_for_status()
+        # Igual que @vercel/blob 2.x: el almacén es privado, así que hay que decirlo al subir (si no, responde 400).
+        # Para leer basta el token (leer_archivo).
+        partes = BLOB_TOKEN.split("_")
+        r = requests.put("https://vercel.com/api/blob/", params={"pathname": ruta}, data=contenido, timeout=60,
+                         headers={"authorization": f"Bearer {BLOB_TOKEN}", "x-api-version": "13",
+                                  "x-vercel-blob-store-id": partes[3] if len(partes) > 3 else "",
+                                  "x-vercel-blob-access": BLOB_ACCESO, "x-content-type": tipo,
+                                  "x-add-random-suffix": "1", "x-content-length": str(len(contenido))})
+        if not r.ok:
+            raise RuntimeError(f"Vercel Blob respondió {r.status_code}: {r.text[:300]}")
         return r.json()["url"]
     f = LOCAL / "archivos" / ruta
     f.parent.mkdir(parents=True, exist_ok=True)
